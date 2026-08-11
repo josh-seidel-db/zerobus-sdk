@@ -1,0 +1,36 @@
+; Runnable examples for the Zerobus OCaml SDK. Each is a standalone executable
+; that reads workspace credentials from the environment (see the header of each
+; file). They are built by CI (compile-checked against the real public API) but
+; only *run* against a live workspace.
+;
+; loop-then-flush is the FIRST example a reader should see — it is the correct
+; ingestion pattern (CLAUDE.md cardinal rule). The rest layer on ack callbacks,
+; the Eio runtime, and the REST / OTLP interfaces.
+
+(executable
+ (name json_loop_then_flush_lwt)
+ (modules json_loop_then_flush_lwt)
+ (libraries zerobus zerobus-core lwt lwt.unix))
+
+(executable
+ (name ack_callback_lwt)
+ (modules ack_callback_lwt)
+ (libraries zerobus zerobus-core lwt lwt.unix))
+
+(executable
+ (name rest_insert_lwt)
+ (modules rest_insert_lwt)
+ (libraries zerobus-rest zerobus-core lwt lwt.unix yojson))
+
+(executable
+ (name otlp_export_lwt)
+ (modules otlp_export_lwt)
+ (libraries zerobus-otlp zerobus-otlp.proto zerobus-core lwt lwt.unix))
+
+; The Eio example needs OCaml >= 5 (like the zerobus-eio package itself).
+(executable
+ (name json_loop_then_flush_eio)
+ (modules json_loop_then_flush_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-eio zerobus-core eio eio_main))

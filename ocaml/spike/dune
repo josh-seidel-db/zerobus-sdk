@@ -1,0 +1,28 @@
+; Generate OCaml types + encoders/decoders for the spike service from the proto.
+; Uses ocaml-protoc (the OCaml-native generator; no external protoc needed).
+(rule
+ (targets ingest.ml ingest.mli)
+ (deps proto/ingest.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . %{deps})))
+
+; Wrap the generated module so it has a stable library name and is kept
+; separate from the test's own module.
+(library
+ (name ingest_proto)
+ (modules ingest)
+ (libraries pbrt))
+
+; The spike is a test executable: `dune runtest` runs the three assertions.
+(test
+ (name bidi_spike)
+ (modules bidi_spike)
+ (libraries
+  ingest_proto
+  grpc
+  grpc-lwt
+  h2-lwt-unix
+  lwt
+  lwt.unix
+  unix
+  alcotest))

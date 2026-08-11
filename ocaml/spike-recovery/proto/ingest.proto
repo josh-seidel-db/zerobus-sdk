@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+// Minimal, Zerobus-shaped bidirectional streaming service used by the
+// recovery spike (ocaml/spike-recovery). Adds a control signal for testing
+// recovery: a signal to drop/close the stream mid-stream so the client must
+// reconnect and replay.
+package ingest;
+
+message IngestRequest {
+  bytes payload = 1;
+  int64 client_seq = 2;
+}
+
+message IngestResponse {
+  int64 offset = 1;   // monotonically increasing, per stream
+  bool  durable = 2;  // server confirms materialized
+}
+
+// Signal from the server to the client: intentionally break the stream.
+// Used only for testing recovery in the spike.
+message StreamDropSignal {
+  string reason = 1;  // "testing", "server failure", etc.
+}
+
+service Ingest {
+  rpc IngestStream(stream IngestRequest) returns (stream IngestResponse);
+  // The server sends StreamDropSignal as an IngestResponse with a special marker,
+  // or via stream closure. For this spike: the server will close the stream
+  // abruptly after acking N records, forcing the client to detect the closure,
+  // reconnect, and replay the un-acked tail.
+}

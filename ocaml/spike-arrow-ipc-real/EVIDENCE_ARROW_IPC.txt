@@ -1,0 +1,13 @@
+ZEROBUS OCAML ARROW IPC CODEC SPIKE -- evidence
+ocaml_version          : 4.14.1
+arrow_cpp              : linked libarrow (real IPC codec)
+rows                   : 5
+ipc_bytes              : 504
+ipc_stream_magic       : 0xFFFFFFFF (stream continuation)
+roundtrip              : FAITHFUL (ids + utf8 strings, incl. empty + unicode)
+ALL CHECKS PASSED
+
+--- provenance ---
+built: dune (foreign_stubs cxx, -std=c++20, pkg-config arrow)
+libarrow: 	/opt/homebrew/opt/apache-arrow/lib/libarrow.2500.dylib
+captured: 2026-08-11T00:57:46Z

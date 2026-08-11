@@ -1,0 +1,32 @@
+; zerobus-arrow: the optional Apache Arrow IPC codec (DESIGN §8.5.2). The ONLY
+; component that links libarrow — a separate package so JSON/Proto users never
+; pull Arrow. Needs C++20 (Arrow 25.x headers use std::span) + Arrow's pkg-config
+; flags; PKG_CONFIG_PATH must include the Homebrew arrow .pc dir.
+
+; cflags for compiling the C++ stub.
+(rule
+ (target arrow_cflags.sexp)
+ (action
+  (with-stdout-to
+   arrow_cflags.sexp
+   (run sh -c "printf '(-std=c++20 ' && pkg-config --cflags arrow && printf ')'"))))
+
+; RAW linker tokens for c_library_flags (no -cclib prefix — that is only for
+; executable link_flags; c_library_flags rejects it).
+(rule
+ (target arrow_libs.sexp)
+ (action
+  (with-stdout-to
+   arrow_libs.sexp
+   (run sh -c "printf '(' && pkg-config --libs arrow && printf ' -lstdc++ )'"))))
+
+(library
+ (name zerobus_arrow)
+ (public_name zerobus-arrow)
+ (foreign_stubs
+  (language cxx)
+  (names zerobus_arrow_stubs)
+  (flags
+   (:include arrow_cflags.sexp)))
+ (c_library_flags
+  (:include arrow_libs.sexp)))

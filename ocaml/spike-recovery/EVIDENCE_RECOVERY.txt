@@ -1,0 +1,21 @@
+ZEROBUS OCAML RECOVERY SPIKE -- transport evidence
+timestamp_utc          : 2026-08-11T00:29:36Z
+ocaml_version          : 4.14.1
+runtime                : Lwt (server in separate process)
+records_target         : 200
+reconnects             : 1  <- >=1 proves recovery triggered
+acks_observed          : 200 (incl. replays)
+all_offsets_acked      : true
+no_duplicates          : true
+offsets_contiguous     : true
+Testing `recovery-spike'.
+This run has ID `W9KOLMN9'.
+
+  [OK]          recovery scenario          0   recovery was triggered (>=1 re...
+  [OK]          recovery scenario          1   all records ultimately acked.
+  [OK]          recovery scenario          2   no duplicate acks.
+  [OK]          recovery scenario          3   offsets contiguous 0..n-1.
+
+Full test results in `~/git/zerobus-sdk/ocaml/spike-recovery/_build/_tests/recovery-spike'.
+Test Successful in 0.001s. 4 tests run.
+EXITCODE=0

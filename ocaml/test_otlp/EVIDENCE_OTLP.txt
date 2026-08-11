@@ -1,0 +1,48 @@
+ZEROBUS OCAML — Phase 7d (Zerobus_otlp) evidence
+=================================================
+Date: 2026-08-11   Switch: fl414 (OCaml 4.14.1)
+
+WHAT: DESIGN §4.3 otlp/grpc exporter (zerobus-otlp package). Ships OpenTelemetry
+logs + metrics to the Zerobus OTLP endpoint via the two unary RPCs:
+  opentelemetry.proto.collector.logs.v1.LogsService/Export
+  opentelemetry.proto.collector.metrics.v1.MetricsService/Export
+over the SAME TLS1.3+ALPN-h2 transport the gRPC SDK uses (reuses zerobus's Lwt
+H2_client — a unary Export is a degenerate bidi: send 1 framed req, close_send,
+recv 1 resp, check grpc-status). Same table-scoped client-credentials OAuth grant
+as Zerobus/Zerobus_rest (Config.oauth_token_request_body), 30s early-refresh cache.
+
+PROTOS: OpenTelemetry collector protos + transitive deps (common, resource, logs,
+metrics, collector/{logs,metrics}) vendored VERBATIM from opentelemetry-proto
+v1.3.2 under lib/otlp/proto/vendor/, INDEPENDENT of the Zerobus wire protos (§4.3).
+Codegen: proto3 numeric `reserved` parses fine in ocaml-protoc 4.1 (NO strip
+needed, unlike the proto2 Zerobus schema). One flat module per file; common.proto's
+shared `values` label needs -w -30. All 6 modules compile as one library
+(zerobus-otlp.proto).
+
+TEST: test_otlp/test_otlp_lwt.ml — mock OTLP collector (otlp_collector.ml, separate
+process, cleartext h2c, grpc-lwt Unary handlers for both Export RPCs speaking the
+REAL vendored protos) + in-process cohttp OIDC token endpoint. 7/7 alcotest green
+(0.057s):
+  - logs Export accepted (OK status)
+  - logs fully accepted (0 rejected)
+  - metrics Export accepted
+  - metrics fully accepted (0 rejected)
+  - partial success surfaced: REJECT1 sentinel -> rejected=1 round-trips
+  - empty batch is a no-op (no RPC)
+  - token cached: 3 exports -> exactly 1 mint
+
+ROUND-TRIP PROOF (collector decode log, ZEROBUS_OTLP_COLLECTOR_LOG):
+  LogsService/Export decoded 2 log record(s)
+  MetricsService/Export decoded 1 metric(s)
+  LogsService/Export decoded 2 log record(s) (REJECT1)
+i.e. the collector actually DECODED the protobuf the exporter framed (counts +
+schema_url match), not just returned OK. The partial-success assertion is only
+reachable if both encode (client) and decode (server) of the collector protos work.
+
+BUILD: dune build lib/otlp/proto/ + lib/otlp/ + test_otlp/ green; opam lint
+zerobus-otlp.opam PASS. No regression in prior fl414 targets.
+
+CAVEAT: mock is not a real Zerobus OTLP endpoint — proves the full client flow
+(grant -> bearer -> unary Export -> status/partial-success) + wire types against a
+faithful collector, not delivery into a real Delta table. Live OTLP export is the
+remaining env-gated step, same posture as the gRPC/REST live checks.

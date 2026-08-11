@@ -1,0 +1,6 @@
+; Phase 1 acceptance: the vendored Zerobus wire types round-trip through the
+; binary protobuf codec. Later phases add the mock-server transport tests here.
+(tests
+ (names test_proto_roundtrip test_config)
+ (modules test_proto_roundtrip test_config)
+ (libraries zerobus_core zerobus_proto pbrt alcotest))

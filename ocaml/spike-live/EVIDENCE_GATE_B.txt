@@ -1,0 +1,17 @@
+== D1 gate B — live wire check ==
+endpoint: 984752964297111.zerobus.eastus2.azuredatabricks.net:443
+table: main.default.zerobus_gateb_146265093832397
+oauth: scoped token minted (value not logged)
+tls: connected, ALPN h2
+
+-- EVIDENCE (D1 gate B) --
+timestamp_utc  : 2026-08-11T01:48:40Z
+rpc            : databricks.zerobus.Zerobus/EphemeralStream (bidi, TLS h2)
+proto          : vendored zerobus_service.proto via ocaml-protoc (gate A)
+create_stream_response: true (stream_id=e8f26710-8c36-41c7-8027-6f534b855b5c)
+durability_ack : false
+grpc_status    : http=200 grpc-status=0 | h2_err=(none)
+timed_out      : false
+decode_error   : none
+RESULT: PASS — live service accepted the generated-proto framing.
+EXIT=0

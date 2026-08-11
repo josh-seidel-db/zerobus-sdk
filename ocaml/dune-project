@@ -1,0 +1,142 @@
+(lang dune 3.7)
+
+; Native OCaml Zerobus Ingest SDK — a peer implementation of the Zerobus gRPC
+; protocol (no FFI to the Rust core). See DESIGN.md and PLAN.md.
+;
+; One runtime-agnostic core (zerobus-core) instantiated by three thin runtime
+; packages (Lwt / Eio / Async). opam files are generated from the metadata below.
+
+(generate_opam_files true)
+
+(name zerobus)
+(source
+ (github databricks/zerobus-sdk))
+(license Apache-2.0)
+(authors "Databricks")
+(maintainers "Databricks")
+
+(package
+ (name zerobus-core)
+ (synopsis "Runtime-agnostic core of the native OCaml Zerobus Ingest SDK")
+ (description
+  "Speaks the Zerobus gRPC ingest protocol directly (no FFI). Runtime-agnostic:\n\
+   the IO functor is instantiated by the zerobus (Lwt), zerobus-eio (Eio), and\n\
+   zerobus-async (Async) packages. Not useful on its own — pick a runtime package.")
+ (depends
+  (ocaml (>= 4.14))
+  (pbrt (>= 3.0))
+  (ocaml-protoc (and (>= 4.1) :build))
+  (alcotest :with-test)))
+
+(package
+ (name zerobus)
+ (synopsis "Native OCaml Zerobus Ingest SDK — Lwt runtime")
+ (description
+  "Lwt instantiation of zerobus-core. Streams records into Databricks tables\n\
+   over gRPC with the loop-then-flush ingestion pattern.")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  lwt
+  lwt_ppx
+  grpc-lwt
+  h2-lwt-unix
+  tls-lwt
+  ca-certs
+  cohttp-lwt-unix
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-eio)
+ (synopsis "Native OCaml Zerobus Ingest SDK — Eio runtime")
+ (description
+  "Eio (direct-style) instantiation of zerobus-core. Requires OCaml >= 5.0.")
+ (depends
+  (ocaml (>= 5.0))
+  (zerobus-core (= :version))
+  eio
+  eio_main
+  grpc-eio
+  h2-eio
+  tls
+  tls-eio
+  mirage-crypto-rng
+  x509
+  ca-certs
+  domain-name
+  cohttp-eio
+  http
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-async)
+ (synopsis "Native OCaml Zerobus Ingest SDK — Async runtime")
+ (description
+  "Async instantiation of zerobus-core. Drives the runtime-agnostic h2 core over\n\
+   an Async Reader/Writer duplex directly (no gluten-async/h2-async). Live TLS is\n\
+   a dune select on the optional tls-async dep; without it, cleartext h2c works\n\
+   and live TLS returns an honest error (see doc/arch/tls_async_status.md).")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  core
+  async
+  ppx_let
+  h2
+  bigstringaf
+  (alcotest :with-test))
+ (depopts tls-async ca-certs domain-name tls))
+
+(package
+ (name zerobus-rest)
+ (synopsis "Native OCaml Zerobus Ingest SDK — stateless REST insert helper")
+ (description
+  "The optional REST interface (DESIGN §4.2): a thin POST-per-batch JSON insert\n\
+   wrapper for low-frequency / edge cases. Reuses zerobus-core's scoped OAuth\n\
+   grant. No streams, offsets, or recovery — for high volume use the zerobus\n\
+   (gRPC streaming) package instead.")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  cohttp-lwt-unix
+  lwt
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-otlp)
+ (synopsis "Native OCaml Zerobus Ingest SDK — OTLP (OpenTelemetry) exporter")
+ (description
+  "The optional OTLP interface (DESIGN §4.3): an otlp/grpc LogsService /\n\
+   MetricsService exporter that ships OpenTelemetry logs and metrics to the\n\
+   Zerobus OTLP endpoint over the same TLS 1.3 + ALPN h2 transport the gRPC SDK\n\
+   uses. Vendors the OpenTelemetry collector protos independently of the Zerobus\n\
+   wire schema.")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  (zerobus (= :version))
+  (pbrt (>= 3.0))
+  (ocaml-protoc (and (>= 4.1) :build))
+  lwt
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-arrow)
+ (synopsis "Native OCaml Zerobus Ingest SDK — optional Apache Arrow IPC codec")
+ (description
+  "The optional Arrow IPC codec for record_type=Arrow (DESIGN §8.5.2). The only\n\
+   component that links Apache Arrow (C++), kept a separate package so JSON/Proto\n\
+   users never pull libarrow. Requires apache-arrow (system, via pkg-config).")
+ (depends
+  (ocaml (>= 4.14))
+  (conf-pkg-config :build)
+  (alcotest :with-test)))

@@ -1,0 +1,22 @@
+; Phase 7b façade-level Arrow test: the PUBLIC Zerobus API auto-selects the Arrow
+; Flight DoPut driver when record_type=Arrow. Uses the PROMOTED libraries — the
+; Flight proto + Flight_protocol now live in zerobus-core, and the Arrow IPC codec
+; is the separate optional zerobus-arrow package (real libarrow). The mock server
+; links zerobus-arrow (to decode + verify the IPC bodies); the test client goes
+; through the public façade and encodes rows with zerobus-arrow.
+;
+; Needs PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig + apache-arrow (for the codec).
+; fl414.
+
+; --- Arrow/Flight mock server (decodes IPC via zerobus-arrow, acks offset) ---
+(executable
+ (name flight_arrow_server)
+ (modules flight_arrow_server)
+ (libraries zerobus-core.proto zerobus-arrow pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+; --- façade test: public Zerobus API + record_type=Arrow + zerobus-arrow codec ---
+(test
+ (name test_driver_arrow)
+ (modules test_driver_arrow)
+ (deps flight_arrow_server.exe)
+ (libraries zerobus zerobus-core zerobus-arrow lwt lwt.unix unix alcotest))

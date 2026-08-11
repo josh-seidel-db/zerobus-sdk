@@ -1,0 +1,63 @@
+ZEROBUS OCAML — LIVE SDK TEST (public API, all runtimes + record types)
+=======================================================================
+Date: 2026-08-11   Workspace: adb-984752964297111.11.azuredatabricks.net (Azure
+field-eng, eastus2, profile azure-field-eng-eastus2)
+Endpoint: 984752964297111.zerobus.eastus2.azuredatabricks.net:443 (TLS1.3+ALPN h2)
+
+WHAT: exercised the SHIPPED public SDK (not a hand-rolled spike) end to end —
+create -> create_stream (built-in client-credentials OAuth) -> loop ingest ->
+flush -> close — against a real workspace, across runtimes and record types.
+Harnesses: ocaml/live/live_lwt.ml (json|proto|arrow), ocaml/live/live_eio.ml.
+Each mode wrote 5 rows {id, name} to its own table; persistence verified by SQL.
+
+RESULTS
+-------
+  Runtime  Record  Result   Rows persisted (SQL SELECT)
+  Lwt      JSON    PASS     [0..4] row-0..row-4   (table .records)
+  Lwt      Proto   PASS     [0..4] row-0..row-4   (table .records_proto)
+  Eio      JSON    PASS     [0..4] row-0..row-4   (table .records_json_eio)
+  Lwt      Arrow   FAIL     none                  (table .records_arrow) — see below
+  Async    (any)   N/A      cannot test live: Async TLS is packaging-blocked on this
+                            switch (gluten-async dummy tls_io); connect ~tls:true returns
+                            an honest Error. Live endpoint requires TLS. See
+                            doc/arch/tls_async_status.md.
+
+For JSON/Proto/Eio: server returned CreateStreamResponse, streamed a durability
+ack up to offset 4 over the OPEN bidi (ack callback fired), flush returned Ok,
+and all 5 rows were confirmed in the Delta table.
+
+TWO REAL SDK BUGS THE LIVE TEST CAUGHT (mocks structurally could not)
+---------------------------------------------------------------------
+1. FIXED — workspace_id derivation (lib/core/config.ml). For an Azure URL
+   `adb-984752964297111.11.azuredatabricks.net`, workspace_id_of_url returned the
+   WHOLE first label `adb-984752964297111` (old logic: "if the label ends in a
+   digit, return the whole label"). That wrong id went into the OAuth `resource`
+   audience -> server rejected every stream with grpc-status=16 UNAUTHENTICATED
+   "Invalid token audience". Fix: extract the first maximal DIGIT RUN in the label
+   -> `984752964297111`. Verified across Azure adb-, GCP numeric, etc. After the
+   fix, JSON/Proto/Eio all PASS. (This bug would have broken EVERY Azure adb- user;
+   the mocks never exercised OAuth audience so they couldn't see it.)
+   Follow-up: add a config unit test for workspace_id_of_url across cloud URL forms.
+
+2. OPEN — Arrow Flight payload framing (zerobus-arrow codec / Flight data_body).
+   Server authenticated + accepted the DoPut stream, then rejected the payload with
+   grpc-status=3 INVALID_ARGUMENT: "Arrow Flight stream decode error: ... Type `i32`
+   ... is unaligned. Error Code: 8002". Our zerobus-arrow.encode emits a full
+   self-contained Arrow IPC stream per record placed opaquely in FlightData.data_body;
+   the real Zerobus Arrow decoder does not accept that framing/alignment. The mock
+   accepted it only because the mock decoded with our OWN symmetric codec. NOT fixed
+   here (needs a real design pass on the Arrow-over-Flight wire format vs. the Rust
+   SDK's arrow path); tracked as a follow-up. JSON/Proto are the durable-proven paths.
+
+CLOUD RESOURCES (created then TORN DOWN)
+----------------------------------------
+- SP "zerobus-ocaml-sdk-livetest" id=142779809332887 appId=68cd7b61-ef01-4216-a5ea-b4cf1c364eff
+  + 1 OAuth secret (stored only in $HOME/.cache 0600). SECRET DELETED (0 remaining
+  -> cannot authenticate). SP removed at WORKSPACE level (SCIM "not found"); inert
+  account shell remains (no secrets, needs account-admin to fully delete — harmless,
+  same documented state as prior sessions).
+- Catalog zerobus_ocaml_test (schema ingest; tables records, records_proto,
+  records_arrow, records_json_eio) — DROPPED CASCADE (verified TABLE_OR_VIEW_NOT_FOUND).
+- Local secret cache $HOME/.cache/zerobus-ocaml-livetest — scrubbed.
+- Debug instrumentation added to lib/ during diagnosis was reverted; the config.ml
+  workspace_id fix was KEPT (real bug fix). Driver tests still 3/3 green after.

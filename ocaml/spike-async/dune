@@ -1,0 +1,34 @@
+; Async transport spike. Proves the SAME three properties as spike/ (Lwt) and
+; spike-eio/ (Eio) but on grpc-async + h2-async, so zerobus-async is validated
+; v1 scope, not design-only.
+;
+; Like the Eio spike, the server runs as a SEPARATE PROCESS (ingest_server_async.exe):
+; grpc-async's client and server share one Async scheduler in-process, and running
+; both on it risks the same class of send/flush interleave hazard the grpc-eio
+; finding exposed. Separate processes is also the real-world topology.
+(rule
+ (targets ingest.ml ingest.mli)
+ (deps proto/ingest.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . %{deps})))
+
+(library
+ (name ingest_proto)
+ (modules ingest)
+ (libraries pbrt))
+
+; Standalone mock ingest server (its own Async scheduler/process). Port = argv.(1).
+(executable
+ (name ingest_server_async)
+ (modules ingest_server_async)
+ (preprocess (pps ppx_let))
+ (libraries ingest_proto grpc grpc-async h2-async async unix))
+
+; Test driver: spawns the server, runs the client (send + ack concurrently on
+; Async pipes), asserts all-acked / interleaved / monotonic.
+(test
+ (name bidi_spike_async)
+ (modules bidi_spike_async)
+ (deps ingest_server_async.exe)
+ (preprocess (pps ppx_let))
+ (libraries ingest_proto grpc grpc-async h2-async async unix alcotest))

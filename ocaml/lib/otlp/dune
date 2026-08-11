@@ -1,0 +1,19 @@
+; zerobus-otlp (§4.3): the optional OTLP (OpenTelemetry) logs/metrics exporter.
+; Unary LogsService/MetricsService Export over the same TLS+ALPN-h2 transport the
+; gRPC SDK uses (reuses zerobus's Lwt H2_client), with the same scoped OAuth grant.
+; Kept a separate package so gRPC/REST users don't pull the OTLP proto surface.
+(library
+ (name zerobus_otlp)
+ (public_name zerobus-otlp)
+ (modules zerobus_otlp)
+ (libraries
+  zerobus-core
+  zerobus-otlp.proto
+  zerobus
+  pbrt
+  cohttp-lwt-unix
+  lwt
+  lwt.unix
+  yojson
+  uri
+  base64))

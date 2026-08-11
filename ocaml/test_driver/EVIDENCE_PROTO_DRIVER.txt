@@ -1,0 +1,38 @@
+ZEROBUS OCAML PHASE 5 DRIVER TEST (Lwt, Proto) -- evidence
+captured: 2026-08-11 (fl414 / OCaml 4.14.1)
+
+Runtime-agnostic streaming driver Zerobus_core.Make(Zerobus.Zerobus_io_lwt) driven
+against the mock EphemeralStream server (separate process, cleartext h2c).
+
+Scenario: create_stream (PROTO with DescriptorProto) -> ingest 200 proto-encoded
+records (queue-only, loop-then-flush) -> flush once -> assert all acked -> close.
+
+Test run output:
+Testing `phase5-driver-proto'.
+This run has ID `FQE6MQOA'.
+
+  [OK]          loop-then-flush-proto          0   no error.
+  [OK]          loop-then-flush-proto          1   all records issued.
+  [OK]          loop-then-flush-proto          2   flush confirms all acked.
+
+Full test results in `~/git/zerobus-sdk/ocaml/_build/_tests/phase5-driver-proto'.
+Test Successful in 0.033s. 3 tests run.
+
+Evidence output:
+ZEROBUS OCAML PHASE 5 DRIVER TEST (Lwt, Proto) -- evidence
+ocaml_version : 4.14.1
+records_issued: 200
+flush_all_acked: true
+error         : none
+
+Proof: The Proto record_type end-to-end path is proven green:
+1. DescriptorProto built in OCaml from proto.Descriptor module (vendor google/protobuf/descriptor.proto)
+2. Descriptor encoded to bytes via Pbrt.Encoder
+3. Descriptor threaded through Options.descriptor and open_stream's Wire.make_create_ingest_stream_request
+4. 200 proto-encoded rows ingested via loop-then-flush pattern (queue-only, no per-record wait)
+5. flush() watermark reached all 200 records durably acked
+6. zero errors, exit 0
+
+Stable across 3+ runs. The real §5 data plane (loop-then-flush / watermark / close)
+holds for Proto record_type just as it does for Json. No regressions to existing
+test_driver_lwt (confirmed passing 3/3).

@@ -1,0 +1,20 @@
+; zerobus (Lwt): the reference runtime instantiation of zerobus-core's IO functor.
+; Phase 2 provides Zerobus_io_lwt (the IO implementation); Phase 4 builds the
+; public Zerobus module (create, create_stream, ingest, flush, close, etc.)
+; with client-credentials OAuth support.
+(library
+ (name zerobus)
+ (public_name zerobus)
+ (libraries
+  zerobus-core
+  h2-lwt-unix
+  bigstringaf
+  lwt
+  lwt.unix
+  tls-lwt
+  ca-certs
+  domain-name
+  cohttp-lwt-unix
+  yojson
+  uri
+  base64))

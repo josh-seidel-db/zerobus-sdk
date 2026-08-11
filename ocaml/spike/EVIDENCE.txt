@@ -1,0 +1,40 @@
+======================================================================
+ ZEROBUS OCAML SDK -- TRANSPORT-RISK SPIKE: CAPTURED EVIDENCE
+ Regenerate: cd ocaml/spike && dune runtest --force  (see README.md)
+======================================================================
+
+-- Toolchain of record ----------------------------------------------
+host_os : Darwin 25.5.0 arm64
+ocaml   : The OCaml toplevel, version 4.14.1
+dune    : 3.22.2
+opam    : alcotest 1.9.1
+opam    : gluten 0.5.2
+opam    : grpc 0.2.0
+opam    : grpc-lwt 0.2.0
+opam    : h2 0.12.0
+opam    : h2-lwt-unix 0.12.0
+opam    : lwt 6.1.1
+opam    : ocaml-protoc 4.1
+opam    : pbrt 4.1
+
+-- Measured facts (fresh run; stderr of bidi_spike.exe) -------------
+timestamp_utc          : 2026-08-08T15:07:43Z
+ocaml_version          : 4.14.1
+records_sent           : 200
+acks_received          : 200
+sends_done_at_first_ack: 3 (of 200)  <- proves ack arrived mid-send
+first_offset           : 0
+last_offset            : 199
+offsets_contiguous     : true
+
+-- Test verdict (dune runtest --force) ------------------------------
+  [OK]          bidi streaming            0   all records acked.
+  [OK]          bidi streaming            1   acks interleave with sends.
+  [OK]          bidi streaming            2   offsets are monotonic.
+  [OK]          fallback framing          0   raw-h2 gRPC framing round-trips.
+Test Successful in 0.001s. 4 tests run.
+
+CONCLUSION: grpc-lwt 0.2.0 + h2 0.12.0 sustain client-initiated bidirectional
+streaming with acks interleaved during sends (first ack at send #3-8 of 200).
+Native gRPC path in DESIGN.md is VIABLE. Raw-h2 framing fallback also round-trips.
+Verdict: GO for design next-step 3.

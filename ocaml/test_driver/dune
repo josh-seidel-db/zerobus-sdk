@@ -1,0 +1,26 @@
+; Phase 5/6 driver tests: the runtime-agnostic Make(Io) driver over Lwt, against
+; mock EphemeralStream servers (separate processes, cleartext h2c).
+; - ephemeral_server:       well-behaved backend (Phase 5 loop-then-flush)
+; - ephemeral_server_drop:  drops the first stream mid-way (Phase 6 recovery)
+; - ephemeral_server_noack: accepts the stream but never acks (flush timeout)
+
+(executable
+ (name ephemeral_server)
+ (modules ephemeral_server)
+ (libraries zerobus-core.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+(executable
+ (name ephemeral_server_drop)
+ (modules ephemeral_server_drop)
+ (libraries zerobus-core.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+(executable
+ (name ephemeral_server_noack)
+ (modules ephemeral_server_noack)
+ (libraries zerobus-core.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+(tests
+ (names test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt)
+ (modules test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt)
+ (deps ephemeral_server.exe ephemeral_server_drop.exe ephemeral_server_noack.exe)
+ (libraries zerobus zerobus-core lwt lwt.unix unix alcotest))

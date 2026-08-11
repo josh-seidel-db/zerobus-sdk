@@ -1,0 +1,4 @@
+(executable
+ (name arrow_ipc_codec_spike)
+ (libraries str unix)
+ (flags (:standard -w -27)))

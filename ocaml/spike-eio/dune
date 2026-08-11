@@ -1,0 +1,29 @@
+; Generate OCaml types + encoders/decoders from the proto (same proto as the Lwt
+; spike). Uses ocaml-protoc; no external protoc needed.
+(rule
+ (targets ingest.ml ingest.mli)
+ (deps proto/ingest.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . %{deps})))
+
+(library
+ (name ingest_proto)
+ (modules ingest)
+ (libraries pbrt))
+
+; Mock Zerobus ingest server -- standalone Eio executable (its own process/event
+; loop), mirroring reality where client and server are separate processes. Takes
+; the listen port as argv.(1).
+(executable
+ (name ingest_server_eio)
+ (modules ingest_server_eio)
+ (libraries ingest_proto grpc grpc-eio h2-eio eio eio_main unix))
+
+; The Eio spike test driver: spawns the server process, runs the client
+; (send-fiber + ack-fiber under a Switch on grpc-eio), asserts the same three
+; properties as the Lwt spike, and prints the measured evidence.
+(test
+ (name bidi_spike_eio)
+ (modules bidi_spike_eio)
+ (deps ingest_server_eio.exe)
+ (libraries ingest_proto grpc grpc-eio h2-eio eio eio_main unix alcotest))

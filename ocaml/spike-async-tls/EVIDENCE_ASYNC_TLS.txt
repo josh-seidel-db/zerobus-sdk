@@ -1,0 +1,55 @@
+ZEROBUS OCAML — Async live TLS: SOLVED (h2-core over tls-async)
+===============================================================
+Date: 2026-08-11. Follow-up that RESOLVES the long-deferred Async TLS blocker.
+
+PROBLEM (recap): the Async transport used h2-async/gluten-async, whose TLS backend
+is a build-time dune `select` that ships a DUMMY tls_io on our switches; and
+gluten-async 0.5.2 doesn't even compile against current tls (Tls.Config.client
+became a result). Plain opam can't produce a working combo — an upstream dead-end.
+
+FIX: bypass gluten-async entirely. h2's core (H2.Client_connection) is
+runtime-agnostic — that's what gluten drives over a socket. So we do TLS with
+tls-async DIRECTLY (as the Lwt transport uses tls-lwt), get a cleartext Async
+Reader/Writer, and pump the h2 core over it ourselves.
+
+MECHANISM SPIKE (this dir):
+- h2_async_tls.ml: Tls_async.connect (Ca_certs + peer-name + ~alpn_protocols:["h2"]),
+  verify ALPN via Session.epoch, then drive H2.Client_connection:
+    write loop: next_write_operation -> Writer.write_bigstring the Faraday IOVecs
+                -> report_write_result; `Yield -> yield_writer; `Close -> stop.
+    read loop : Reader.read_one_chunk_at_a_time -> Client_connection.read;
+                EOF -> read_eof.
+- ingest_live.ml: EphemeralStream JSON ingest (CreateStream + 5 rows) over that
+  connection, gRPC length-prefix framing, drain acks.
+
+LIVE PROOF (throwaway switch fl414-asyncspike: h2 0.13 + tls-async + async, NO
+gluten-async; removed after; fl414 kept pristine):
+  endpoint 984752964297111.zerobus.eastus2.azuredatabricks.net:443, TLS1.3+ALPN h2
+  == Async live-TLS ingest ==
+  tls: connected, ALPN h2
+  create_resp=true durability_ack=false grpc-status=0
+  RESULT: PASS — Async live-TLS accepted stream
+  => 5 rows VERIFIED PERSISTED in Delta (durability_ack just outside the client's
+     close window, same as the other runtimes; the table query is the real proof).
+
+INTEGRATED INTO THE LIB (lib/async/):
+- h2_pump.ml: the reusable Client_connection <-> Reader/Writer pump.
+- tls_connect.real.ml / tls_connect.dummy.ml: dune SELECT on tls-async. Real =
+  Tls_async.connect + ALPN h2 verification -> (reader, writer, shutdown). Dummy
+  (no tls-async) = honest Error. Cleartext h2c = plain Tcp.connect duplex.
+- zerobus_io_async.ml connect: builds the duplex (TLS or cleartext) ->
+  H2.Client_connection.create -> H2_pump.start; wraps as the existing connection.
+- DROPPED h2-async + grpc-async deps. dune-project: h2 + (depopts tls-async
+  ca-certs domain-name tls). zerobus-async.opam regenerated + opam-lint clean.
+
+PACKAGING NOTE (why select, not hard dep): tls-async pulls async v0.15 + h2 0.13;
+fl414 (canonical, all other green tests) is v0.16 + h2 0.12, and h2 0.12<->0.13
+differ (Body.Writer.flush callback signature). So the integrated lib targets
+fl414's h2 0.12 and does NOT install tls-async on fl414. The select means: on
+fl414 cleartext works + live TLS returns an honest error; on any switch with a
+compatible tls-async + h2, live TLS lights up with the SAME code. 6 Async mock
+tests still green on fl414 after the transport rewrite.
+
+CLEANUP: cloud resources (SP appId a7f73ebb-..., secret, catalog) all torn down;
+throwaway switch removed. Full architecture writeup: doc/arch/tls_async_status.md
+(RESOLVED section).

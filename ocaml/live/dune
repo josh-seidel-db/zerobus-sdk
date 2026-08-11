@@ -1,0 +1,22 @@
+; Live SDK harnesses (run against a real workspace via env vars; NOT part of CI).
+; live_lwt: JSON/Proto/Arrow via the public Zerobus (Lwt) API — mode in argv.(1).
+; live_eio: JSON via the public Zerobus_eio API (built-in OAuth + live TLS).
+
+(executable
+ (name live_lwt)
+ (modules live_lwt)
+ (libraries zerobus zerobus-core zerobus-core.proto zerobus-arrow pbrt lwt lwt.unix))
+
+(executable
+ (name live_eio)
+ (modules live_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries
+  zerobus-eio
+  zerobus-core
+  zerobus-core.proto
+  zerobus-arrow
+  pbrt
+  eio
+  eio_main))

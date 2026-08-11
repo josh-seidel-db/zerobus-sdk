@@ -1,0 +1,23 @@
+ZEROBUS OCAML PHASE 5 DRIVER TEST (Lwt) -- evidence
+captured: 2026-08-11 (fl414 / OCaml 4.14.1)
+
+Runtime-agnostic streaming driver Zerobus_core.Make(Zerobus.Zerobus_io_lwt) driven
+against the mock EphemeralStream server (separate process, cleartext h2c).
+Scenario: create_stream (JSON) -> ingest 200 records (queue-only, loop-then-flush)
+-> flush once -> assert all acked -> close.
+
+Testing `phase5-driver'.
+  [OK]          loop-then-flush          0   no error.
+  [OK]          loop-then-flush          1   all records issued.
+  [OK]          loop-then-flush          2   flush confirms all acked.
+Test Successful in 0.011s. 3 tests run.
+
+records_issued : 200
+flush_all_acked: true   (durability watermark reached the last issued offset)
+error          : none
+
+Stable across 4 runs (exit 0 each). Proves: the real §5 data plane
+(create_stream / ingest / flush / wait_for_offset watermark / close) works end to
+end over the IO functor; and the raw-h2 send-with-flush fix (§6.5 / gate B) is
+required — without it the driver deadlocks waiting for acks that never arrive
+because the request frames were never flushed to the server.

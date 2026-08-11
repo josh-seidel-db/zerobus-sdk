@@ -1,0 +1,19 @@
+; Phase 5 driver test on the Async runtime: the runtime-agnostic Make(Io) driver
+; over the Async instantiation, against a mock EphemeralStream server (separate
+; process, cleartext h2c). In its own dir (not test_driver/, which is Lwt) because
+; the Async mock links the grpc-async/h2-async/async stack and uses ppx_let.
+;
+; - ephemeral_server_async: well-behaved backend (Phase 5 loop-then-flush)
+
+(executable
+ (name ephemeral_server_async)
+ (modules ephemeral_server_async)
+ (preprocess (pps ppx_let))
+ (libraries zerobus-core.proto pbrt grpc grpc-async h2-async core async unix))
+
+(tests
+ (names test_driver_async test_facade_async)
+ (modules test_driver_async test_facade_async)
+ (deps ephemeral_server_async.exe)
+ (preprocess (pps ppx_let))
+ (libraries zerobus-async zerobus-core core async unix alcotest))

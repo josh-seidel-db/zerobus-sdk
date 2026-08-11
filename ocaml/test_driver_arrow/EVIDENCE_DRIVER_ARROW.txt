@@ -1,0 +1,36 @@
+ZEROBUS OCAML — PHASE 7b DRIVER-LEVEL ARROW WIRING
+The runtime-generic driver run over a Flight DoPut PROTOCOL with real Arrow IPC.
+
+ocaml_version : 4.14.1
+driver        : Zerobus_core.Make_with_protocol (Io_lwt) (Flight)
+rpc           : arrow.flight.protocol.FlightService/DoPut (bidi, cleartext h2c mock)
+arrow_library : real libarrow (Arrow 25.0.1) — client encodes rows, server decodes
+record_type   : Arrow
+
+RESULT: PASS (3/3, stable x3)
+- 50 records, each a real Arrow IPC batch ({id:int64; name:string}) produced by the
+  libarrow codec, ingested via the driver's ingest (loop-then-flush).
+- Driver framed each as FlightData (IPC bytes in data_body, offset in app_metadata),
+  streamed over DoPut; the mock server Arrow-DECODED every data_body and acked the
+  durable offset as the watermark in PutResult.app_metadata.
+- The driver's SHARED control plane (offset assignment, durability watermark,
+  flush, un-acked replay buffer, ack-reader daemon) advanced on those watermarks and
+  flush() confirmed all 50 acked — the SAME code path that serves JSON/Proto.
+
+WHAT THIS PROVES beyond the standalone seam (spike-arrow-flight-integration):
+  record_type=Arrow now runs through the ACTUAL Make(Io) driver, via the PROTOCOL
+  abstraction added to lib/core/stream.ml. Only the 4 wire ops differ (service/rpc,
+  create_frame, record_frame, decode_ack); everything else is reused.
+
+ARCHITECTURE / ISOLATION:
+  - lib/core/stream.ml: PROTOCOL module type + `ack` variant; Ephemeral instance
+    (default, JSON/Proto) stays in core. Make_with_protocol(Io)(P) is the driver
+    body; Make(Io) = Make_with_protocol(Io)(Ephemeral) — the existing single-arg
+    API is UNCHANGED (all 8 prior tests still green on both switches).
+  - The Flight PROTOCOL instance + libarrow live in test_driver_arrow/, NOT lib/core.
+    Verified via otool -L that the core/Lwt driver (test_driver_lwt.exe) does NOT
+    link libarrow. JSON/Proto never pull Arrow.
+
+Build: PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig + C++20 + apache-arrow. fl414.
+Run: dune exec ./test_driver_arrow/test_driver_arrow.exe  (kill flight_arrow_server
+     first; watchdog — ~5s).

@@ -1,0 +1,25 @@
+; zerobus-async: Async instantiation of zerobus-core's IO functor.
+;
+; The transport drives the runtime-agnostic h2 core (H2.Client_connection) over an
+; Async Reader/Writer duplex ourselves (see h2_pump.ml) — NOT gluten-async/h2-async,
+; whose TLS backend is a build-time dummy on our switches. TLS connect is a dune
+; [select] on tls-async: real (tls_connect.real.ml) when it is installed, else an
+; honest-error stub (tls_connect.dummy.ml). So this builds on a switch WITHOUT
+; tls-async (cleartext h2c mocks work; live TLS returns an error) and gains live
+; TLS wherever tls-async is present. See doc/arch/tls_async_status.md.
+(library
+ (name zerobus_async)
+ (public_name zerobus-async)
+ (preprocess
+  (pps ppx_let))
+ (libraries
+  zerobus-core
+  core
+  async
+  h2
+  bigstringaf
+  (select
+   tls_connect.ml
+   from
+   (tls-async ca-certs domain-name tls -> tls_connect.real.ml)
+   (-> tls_connect.dummy.ml))))

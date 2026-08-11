@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+// Minimal, Zerobus-shaped bidirectional streaming service used only by the
+// transport-risk spike (ocaml/spike). This is NOT the real Zerobus wire
+// protocol -- it is the smallest service that reproduces the property we need to
+// prove: a client-initiated bidi stream where the client pushes many records and
+// the server returns an acknowledgment (offset) per record, out of band.
+package ingest;
+
+// One record the client wants durably written. `payload` stands in for the
+// user's proto/JSON row; `client_seq` lets the spike assert ordering.
+message IngestRequest {
+  bytes payload = 1;
+  int64 client_seq = 2;
+}
+
+// The server's durability acknowledgment for a previously-sent record.
+message IngestResponse {
+  int64 offset = 1;   // monotonically increasing, per stream
+  bool  durable = 2;  // server confirms materialized
+}
+
+service Ingest {
+  // Bidirectional: the client streams IngestRequests and concurrently receives
+  // IngestResponses. Precisely the RPC shape of the Zerobus ingest hot path.
+  rpc IngestStream(stream IngestRequest) returns (stream IngestResponse);
+}

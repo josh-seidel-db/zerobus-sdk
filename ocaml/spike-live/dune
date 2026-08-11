@@ -1,0 +1,66 @@
+; Live spike against a REAL Databricks workspace. Two independent native-OCaml
+; programs proving DESIGN.md §12.1 (TLS+ALPN h2) and §12.2 (scoped OAuth):
+;
+;   tls_alpn    -- native tls-lwt + ca-certs handshake to the real Zerobus gRPC
+;                  endpoint; asserts negotiated ALPN = "h2" and cert chain verifies.
+;   oauth_token -- native cohttp-lwt-unix POST to /oidc/v1/token with the Zerobus
+;                  scope/resource/authorization_details; asserts a scoped token.
+;
+; Both read connection details from env vars (see run.sh / README) so no secret is
+; ever hard-coded. Uses ONLY the dependency the design says is required (tls-lwt +
+; ca-certs) plus libraries already in the closure (cohttp-lwt-unix, yojson, uri).
+
+(executable
+ (name tls_alpn)
+ (modules tls_alpn)
+ (libraries tls tls-lwt ca-certs lwt lwt.unix domain-name))
+
+(executable
+ (name oauth_token)
+ (modules oauth_token)
+ (libraries cohttp-lwt-unix lwt lwt.unix yojson uri base64))
+
+; D1 gate B — live wire check: encodes a real EphemeralStream exchange with the
+; generated (gate-A) proto types and sends it over TLS+ALPN h2 + scoped OAuth to
+; the real Zerobus gRPC endpoint; asserts the server accepts the framing.
+(executable
+ (name gate_b_wire)
+ (modules gate_b_wire)
+ (libraries
+  zerobus-core.proto
+  pbrt
+  grpc
+  grpc-lwt
+  h2-lwt-unix
+  tls
+  tls-lwt
+  ca-certs
+  domain-name
+  cohttp-lwt-unix
+  lwt
+  lwt.unix
+  yojson
+  uri
+  base64))
+
+; Live PROTO validation: sends a real DescriptorProto (record_type=Proto) + proto
+; rows to the live Zerobus service and asserts the server validates the descriptor
+; against the table schema. Follow-up to gate B (which used JSON).
+(executable
+ (name proto_live)
+ (modules proto_live)
+ (libraries
+  zerobus-core.proto
+  pbrt
+  h2-lwt-unix
+  tls
+  tls-lwt
+  ca-certs
+  domain-name
+  cohttp-lwt-unix
+  lwt
+  lwt.unix
+  yojson
+  uri
+  base64
+  bigstringaf))
