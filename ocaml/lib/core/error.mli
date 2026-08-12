@@ -13,6 +13,10 @@ type t =
       (** a non-OK gRPC status from the service *)
   | Protocol_error of string  (** malformed / unexpected wire message *)
   | Timeout of string  (** ack watchdog / flush / connect deadline *)
+  | Backpressure of string
+      (** the un-acked buffer is full and [overflow_policy = Fail]: the caller
+          over-produced relative to the ack rate. The stream is healthy — retry the
+          [ingest] after waiting / flushing. Not retryable by the recovery driver. *)
 
 val to_string : t -> string
 

@@ -3,6 +3,8 @@
 ; - ephemeral_server:       well-behaved backend (Phase 5 loop-then-flush)
 ; - ephemeral_server_drop:  drops the first stream mid-way (Phase 6 recovery)
 ; - ephemeral_server_noack: accepts the stream but never acks (flush timeout)
+; - ephemeral_server_close: sends a graceful CloseStreamSignal mid-stream then ends
+;   the body cleanly (stream_paused_max_wait_time_ms drain-then-recover path)
 
 (executable
  (name ephemeral_server)
@@ -19,8 +21,16 @@
  (modules ephemeral_server_noack)
  (libraries zerobus-core.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
 
+(executable
+ (name ephemeral_server_close)
+ (modules ephemeral_server_close)
+ (libraries zerobus-core.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
 (tests
- (names test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt)
- (modules test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt)
- (deps ephemeral_server.exe ephemeral_server_drop.exe ephemeral_server_noack.exe)
+ (names test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt
+   test_graceful_close_lwt test_connect_timeout_lwt test_backpressure_lwt)
+ (modules test_driver_lwt test_recovery_lwt test_driver_proto_lwt test_flush_timeout_lwt
+   test_graceful_close_lwt test_connect_timeout_lwt test_backpressure_lwt)
+ (deps ephemeral_server.exe ephemeral_server_drop.exe ephemeral_server_noack.exe
+   ephemeral_server_close.exe)
  (libraries zerobus zerobus-core lwt lwt.unix unix alcotest))

@@ -10,6 +10,10 @@ open! Async
 
 let available = false
 
+(* Signature parity with [tls_connect.real.ml] (see its doc). No TLS here, so the
+   pin is inert — kept so both [select] alternatives expose the same interface. *)
+let pinned_cert_fp_sha256_b64 : string option ref = ref None
+
 let connect ~host:_ ~port:_ :
     (Reader.t * Writer.t * (unit -> unit Deferred.t), string) Deferred.Result.t =
   return

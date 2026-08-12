@@ -1,8 +1,19 @@
 # Zerobus SDK for OCaml — Design Document
 
-**Status:** Design proposal — no code written yet. This document outlines what a
-100% native OCaml Zerobus Ingest SDK would look like: idiomatic OCaml, no FFI to
-the Rust core, supporting both OCaml 4.14 and 5.x through a runtime-abstracted
+**Status:** ⚠️ **Historical design proposal (2026-08-08), since IMPLEMENTED.** This
+document is preserved as the original design record — it was written before any
+code existed and describes what the SDK "would" look like. The SDK has since been
+built and exceeds this proposal: all three runtimes (Lwt/Eio/Async) have working
+transports with live TLS, built-in OAuth, recovery, Proto/JSON/Arrow encodings,
+and the REST + OTLP interfaces. Some spike-era details below (e.g. gluten-based
+TLS, "next steps", per-runtime "deferred" notes) reflect the design-time picture,
+NOT the shipped code — for current capabilities and status see [`README.md`](README.md),
+[`doc/concurrency.md`](doc/concurrency.md), and [`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md).
+The goals, architecture (runtime-agnostic core + thin runtime packages), and
+protocol design in this document remain the accurate description of the SDK's shape.
+
+This document outlines a 100% native OCaml Zerobus Ingest SDK: idiomatic OCaml, no
+FFI to the Rust core, supporting both OCaml 4.14 and 5.x through a runtime-abstracted
 package split.
 
 **Author:** Josh Seidel

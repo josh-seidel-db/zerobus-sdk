@@ -15,11 +15,23 @@
  (libraries
   zerobus-core
   core
+  core_unix
   async
   h2
   bigstringaf
   (select
    tls_connect.ml
    from
-   (tls-async ca-certs domain-name tls -> tls_connect.real.ml)
-   (-> tls_connect.dummy.ml))))
+   (tls-async ca-certs domain-name tls x509 ptime.clock.os ->
+    tls_connect.real.ml)
+   (-> tls_connect.dummy.ml))
+  ; Built-in client-credentials OAuth HTTP backend: a [select] on cohttp-async
+  ; (+ yojson/uri/base64) so the Async package does NOT force cohttp-async (and its
+  ; cohttp 6.0->5.3 downgrade) on switches that only want the gRPC transport. When
+  ; present, mint_token/with_stream_oauth work; when absent, they return an honest
+  ; error and the caller supplies a bearer via with_stream's headers_provider.
+  (select
+   oauth.ml
+   from
+   (cohttp-async yojson uri base64 -> oauth.real.ml)
+   (-> oauth.dummy.ml))))

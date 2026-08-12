@@ -46,6 +46,17 @@ module type IO = sig
       must actually overlap. *)
   val both : (unit -> 'a t) -> (unit -> 'b t) -> ('a * 'b) t
 
+  (** Run two computations concurrently and return the result of whichever finishes
+      FIRST, abandoning (Lwt/Eio: cancelling) the loser. Both branches yield the
+      same type so the caller can race a real computation against a timer branch
+      (e.g. [first connect (fun () -> sleep t; Timeout)]) — see the [timeout] use in
+      the stream driver. Cancellation semantics follow the runtime: Lwt [Lwt.pick]
+      and Eio [Fiber.first] hard-cancel the loser; Async has no hard fiber
+      cancellation, so the losing [Deferred] is simply detached (matching the
+      discipline in {!Scope}) — callers must therefore keep loser side effects
+      idempotent / harmless when abandoned. *)
+  val first : (unit -> 'a t) -> (unit -> 'a t) -> 'a t
+
   (** Fork a long-lived background fiber {e into a scope} — never unscoped, so
       Eio's switch requirement is met. Used for the ack-reader daemon. *)
   val fork_daemon : Scope.t -> (unit -> unit t) -> unit

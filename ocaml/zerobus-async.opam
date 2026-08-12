@@ -16,6 +16,7 @@ depends: [
   "ocaml" {>= "4.14"}
   "zerobus-core" {= version}
   "core"
+  "core_unix"
   "async"
   "ppx_let"
   "h2"
@@ -23,7 +24,18 @@ depends: [
   "alcotest" {with-test}
   "odoc" {with-doc}
 ]
-depopts: ["tls-async" "ca-certs" "domain-name" "tls"]
+depopts: [
+  "tls-async"
+  "ca-certs"
+  "domain-name"
+  "tls"
+  "x509"
+  "ptime"
+  "cohttp-async"
+  "yojson"
+  "uri"
+  "base64"
+]
 build: [
   ["dune" "subst"] {dev}
   [

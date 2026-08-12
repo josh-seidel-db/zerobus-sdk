@@ -54,6 +54,12 @@ let both (a : unit -> 'a t) (b : unit -> 'b t) : 'a * 'b =
   | Some x, Some y -> (x, y)
   | _ -> failwith "Fiber.both did not set both results"
 
+(* First-wins race: Eio.Fiber.first runs both and returns the first to finish,
+   CANCELLING the loser — the abandon-the-loser semantics {!Io.IO.first} wants.
+   Direct style: the thunks return values directly. *)
+let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t =
+  Eio.Fiber.first a b
+
 let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
   Eio.Fiber.fork_daemon ~sw:scope.Scope.sw (fun () ->
       (try f () with _ -> ());
@@ -378,6 +384,7 @@ module Io_impl = struct
   let map = map
   module Scope = Scope
   let both = both
+  let first = first
   let fork_daemon = fork_daemon
   module Mutex = Mutex
   module Mailbox = Mailbox

@@ -86,12 +86,20 @@
   (ocaml (>= 4.14))
   (zerobus-core (= :version))
   core
+  core_unix
   async
   ppx_let
   h2
   bigstringaf
   (alcotest :with-test))
- (depopts tls-async ca-certs domain-name tls))
+ ; Two dune [select]s on optional deps (see doc/arch/tls_async_status.md):
+ ;  - live TLS: tls-async + ca-certs + domain-name + tls + x509 + ptime (the
+ ;    cert-fp authenticator) build the real tls_connect backend; else a stub.
+ ;  - built-in OAuth: cohttp-async + yojson + uri + base64 build the real oauth
+ ;    backend (client-credentials token mint); else mint_token returns an error and
+ ;    the caller passes a bearer via with_stream's headers_provider.
+ (depopts tls-async ca-certs domain-name tls x509 ptime cohttp-async yojson uri
+  base64))
 
 (package
  (name zerobus-rest)
@@ -106,6 +114,54 @@
   (zerobus-core (= :version))
   cohttp-lwt-unix
   lwt
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-rest-eio)
+ (synopsis "Native OCaml Zerobus Ingest SDK — stateless REST insert helper (Eio)")
+ (description
+  "The Eio (direct-style) instantiation of the optional REST interface\n\
+   (DESIGN §4.2): the counterpart of zerobus-rest (Lwt). A thin POST-per-batch\n\
+   JSON insert wrapper over cohttp-eio, reusing zerobus-core's scoped OAuth\n\
+   grant. Requires OCaml >= 5.0. For high volume use the zerobus-eio (gRPC\n\
+   streaming) package instead.")
+ (depends
+  (ocaml (>= 5.0))
+  (zerobus-core (= :version))
+  cohttp-eio
+  eio
+  eio_main
+  tls
+  tls-eio
+  mirage-crypto-rng
+  x509
+  ca-certs
+  domain-name
+  http
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-rest-async)
+ (synopsis "Native OCaml Zerobus Ingest SDK — stateless REST insert helper (Async)")
+ (description
+  "The Async instantiation of the optional REST interface (DESIGN §4.2): the\n\
+   counterpart of zerobus-rest (Lwt). A thin POST-per-batch JSON insert wrapper\n\
+   over cohttp-async, reusing zerobus-core's scoped OAuth grant. The library is\n\
+   optional (builds only where cohttp-async is installed). For high volume use\n\
+   the zerobus-async (gRPC streaming) package instead.")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  core
+  async
+  ppx_let
+  cohttp-async
   yojson
   uri
   base64
@@ -127,6 +183,60 @@
   (pbrt (>= 3.0))
   (ocaml-protoc (and (>= 4.1) :build))
   lwt
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-otlp-async)
+ (synopsis "Native OCaml Zerobus Ingest SDK — OTLP (OpenTelemetry) exporter (Async)")
+ (description
+  "The Async instantiation of the optional OTLP interface (DESIGN §4.3): the\n\
+   counterpart of zerobus-otlp (Lwt). An otlp/grpc LogsService / MetricsService\n\
+   exporter over the Async H2 transport (reuses zerobus-async), sharing the\n\
+   vendored OpenTelemetry collector protos (zerobus-otlp.proto). The library is\n\
+   optional (builds only where cohttp-async is installed).")
+ (depends
+  (ocaml (>= 4.14))
+  (zerobus-core (= :version))
+  (zerobus-async (= :version))
+  (pbrt (>= 3.0))
+  (ocaml-protoc (and (>= 4.1) :build))
+  core
+  async
+  ppx_let
+  cohttp-async
+  yojson
+  uri
+  base64
+  (alcotest :with-test)))
+
+(package
+ (name zerobus-otlp-eio)
+ (synopsis "Native OCaml Zerobus Ingest SDK — OTLP (OpenTelemetry) exporter (Eio)")
+ (description
+  "The Eio (direct-style) instantiation of the optional OTLP interface\n\
+   (DESIGN §4.3): the counterpart of zerobus-otlp (Lwt). An otlp/grpc\n\
+   LogsService / MetricsService exporter over the Eio H2 transport (reuses\n\
+   zerobus-eio), sharing the vendored OpenTelemetry collector protos\n\
+   (zerobus-otlp.proto). Requires OCaml >= 5.0.")
+ (depends
+  (ocaml (>= 5.0))
+  (zerobus-core (= :version))
+  (zerobus-eio (= :version))
+  (pbrt (>= 3.0))
+  (ocaml-protoc (and (>= 4.1) :build))
+  cohttp-eio
+  eio
+  eio_main
+  tls
+  tls-eio
+  mirage-crypto-rng
+  x509
+  ca-certs
+  domain-name
+  http
+  yojson
+  uri
+  base64
   (alcotest :with-test)))
 
 (package

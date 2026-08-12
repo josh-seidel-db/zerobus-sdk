@@ -27,12 +27,34 @@ make ordering meaningless.
 Internally the send side and the ack-reader **are** concurrent — that is the
 whole design (queue records while acks stream back) — but those are the SDK's own
 fibers, coordinated through a bounded mailbox. They are not the caller's
-concurrency to manage. The SDK deliberately does **not** put a lock on the hot
-`ingest` path: that would tax the common single-writer case for a guarantee
-callers rarely want.
+concurrency to manage. `ingest` does take the stream's state lock briefly to
+assign the offset, admit the record to the replay buffer, and check the flow-control
+bound atomically (so a record can never be queued onto an already-failed stream and
+the un-acked byte accounting stays exact); the lock is held only for that
+bookkeeping, not across the network send.
 
 If you genuinely need concurrent writers to one logical table, either serialize
 them behind your own mutex, or — better — shard across multiple streams (below).
+
+## Flow control: `ingest` never loses, and may block
+
+The driver holds an un-acked replay buffer (for recovery) bounded by
+`max_inflight_requests` and `max_inflight_bytes`. Records are **never dropped** to
+stay within the bound. When the buffer is full, `overflow_policy` governs `ingest`:
+
+- **`Block`** (default): `ingest` suspends *in the effect* — the Lwt promise / Eio
+  fiber / Async job parks until the ack-reader drains the buffer, then proceeds.
+  This is the one place `ingest` can block, and it is cooperative (it never blocks
+  an OS thread): other fibers on the same runtime keep running. It still comes from
+  the single writer, so ordering is preserved.
+- **`Fail`**: `ingest` returns `Error (Backpressure _)` immediately instead of
+  parking. The stream stays healthy — this is a producer-over-production signal, not
+  a fault, so it does not trigger recovery.
+
+The byte ceiling defaults (`max_inflight_bytes = None`) to a budget derived from the
+process's available memory, so it scales with the machine but never grows unbounded.
+Blocked producers are also released if the stream fails, so a `Block` `ingest` never
+hangs forever — it wakes and observes the error.
 
 ## Fan-out = more streams, not more writers per stream
 
@@ -58,10 +80,11 @@ with the results-over-exceptions rule.
   `Switch` the bracket owns, and the stream is valid only inside the body. "Single
   writer" means a single fiber. Do not share a `stream` across fibers without your
   own synchronization.
-- **Async (`zerobus-async`)** — the façade is bracket-shaped (`with_stream`) and
-  takes a caller-supplied `headers_provider` for auth (built-in OAuth and live TLS
-  are deferred follow-ups; Lwt is the TLS reference). "Single writer" means a
-  single Async job.
+- **Async (`zerobus-async`)** — the façade is bracket-shaped (`with_stream` /
+  `with_stream_oauth`). Built-in client-credentials OAuth and live TLS are both
+  available as dune `select`s on optional deps (`cohttp-async`, `tls-async`); where
+  a dep is absent, pass a bearer via `with_stream`'s `headers_provider` (Lwt/Eio
+  are the always-on TLS references). "Single writer" means a single Async job.
 
 ## The bidirectional core
 

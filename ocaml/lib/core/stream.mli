@@ -12,7 +12,9 @@
 type ack =
   | Watermark of int64  (** durability watermark: all offsets <= n are durable *)
   | Created  (** stream/schema accepted; not an ack, keep reading *)
-  | Closed  (** server signalled end-of-stream *)
+  | Closed of int
+      (** server signalled it will close the stream in [n] ms (0 if no duration
+          was carried); honored via [stream_paused_max_wait_time_ms]. *)
 
 (** The on-the-wire protocol the driver runs over. *)
 module type PROTOCOL = sig

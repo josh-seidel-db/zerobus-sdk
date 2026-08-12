@@ -3,13 +3,15 @@
     The Async counterpart of the Lwt {!Zerobus} module, bridging
     {!Zerobus_core.Make}[(Zerobus_io_async)] to an ergonomic entry point.
 
-    {b Scope of this façade.} Unlike the Lwt reference, this module does NOT offer
-    a built-in client-credentials [create_stream]: the Async switch has no HTTP
-    client (cohttp-async) / JSON wired, and the Async TLS transport is deferred
-    (Lwt is the live-verified TLS+ALPN reference). Auth is therefore supplied by
-    the caller through [headers_provider] — which, with [~tls:false], also drives
-    the full façade→driver path against a cleartext mock. Live TLS + built-in OAuth
-    on Async are tracked follow-ups.
+    {b Scope of this façade.} It is bracket-shaped ([with_stream] /
+    [with_stream_oauth]) rather than detached, matching Async's lack of hard fiber
+    cancellation. Live TLS and built-in client-credentials OAuth are both available
+    as dune [select]s on optional deps ([tls-async] and [cohttp-async]): when the
+    dep is present they work; when absent, [with_stream_oauth]/[mint_token] return
+    an [Auth_error] ([oauth_available] reports which) and TLS connects return an
+    honest error — so the caller supplies a bearer via [headers_provider] and, with
+    [~tls:false], drives the full façade→driver path against a cleartext mock.
+    (Lwt/Eio are the always-on TLS references; see doc/arch/tls_async_status.md.)
 
     The cardinal rule of ingestion: queue records in a loop, then {!flush} once.
     Never wait after every {!ingest} — throughput collapses. *)
@@ -87,6 +89,39 @@ val with_stream :
   (stream -> 'a Deferred.t) ->
   ('a, Zerobus_core.Error.t) result Deferred.t
 
+(** {1 Built-in client-credentials OAuth (§12.2)} *)
+
+(** Whether built-in OAuth is compiled in — [true] iff [cohttp-async] was present
+    at build time (a dune [select]). When [false], {!mint_token} /
+    {!with_stream_oauth} return an [Auth_error]; supply a bearer via
+    {!with_stream}'s [headers_provider] instead. *)
+val oauth_available : bool
+
+(** Mint a table-scoped OAuth token via the client-credentials grant (HTTPS POST
+    to [<workspace_url>/oidc/v1/token]; id/secret in the HTTP Basic header). The
+    token is cached on [client] with its expiry and refreshed ~30s early. Returns
+    [Auth_error] on HTTP/parse failure, [Transport_error] on a request exception. *)
+val mint_token :
+  client:t ->
+  table:string ->
+  client_id:string ->
+  client_secret:string ->
+  (string, Zerobus_core.Error.t) result Deferred.t
+
+(** Open a stream with built-in client-credentials OAuth and run [f] with it
+    (bracket form) — the ergonomic Async counterpart of the Lwt
+    [Zerobus.create_stream] / the Eio [Zerobus_eio.with_stream_oauth]. Mints a
+    table-scoped token, builds the bearer + table-name headers, opens the stream
+    over TLS inside the owning scope, then tears it down on exit. *)
+val with_stream_oauth :
+  t ->
+  table_properties ->
+  client_id:string ->
+  client_secret:string ->
+  ?options:stream_options ->
+  (stream -> 'a Deferred.t) ->
+  ('a, Zerobus_core.Error.t) result Deferred.t
+
 (** {1 Low-level access (tests / advanced)} *)
 
 (** The Async {!Zerobus_core.Io.IO} instantiation (transport, [Scope], …). *)
@@ -94,3 +129,18 @@ module Io_async_for_test : module type of Zerobus_io_async
 
 (** The Async streaming driver ([Zerobus_core.Make] over the Async IO). *)
 module Driver : module type of Zerobus_io_async.Stream
+
+(** The TLS connect backend (a dune [select] on tls-async: the real backend when
+    tls-async is installed, else an honest-error stub). Exposed so the in-tree
+    live-TLS test can pin a self-signed cert via [pinned_cert_fp_sha256_b64] — the
+    Async analogue of the Eio [~authenticator] override. Not part of the ergonomic
+    surface (see doc/arch/tls_async_status.md). *)
+module Tls_connect : sig
+  val available : bool
+
+  (** When [Some "<sha256-b64>"], authenticate the TLS peer by pinning that exact
+      certificate fingerprint instead of the system trust store — for testing
+      against a self-signed h2 mock. Prod leaves it [None]. Inert in the
+      honest-error stub backend. *)
+  val pinned_cert_fp_sha256_b64 : string option ref
+end

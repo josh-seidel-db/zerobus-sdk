@@ -1,0 +1,31 @@
+; Async OTLP test: Zerobus_otlp_async against a separate-process grpc-async mock
+; collector (cleartext h2c) + an in-process cohttp-async OIDC token endpoint. The
+; Async counterpart of test_otlp/test_otlp_lwt.
+;
+; (optional) so the dir VANISHES on switches WITHOUT cohttp-async (e.g. the
+; canonical fl414) instead of erroring — zerobus-otlp-async is itself optional on
+; cohttp-async. It lights up on a cohttp-async-equipped switch. NOT in CI's fl414
+; job (which targets specific dirs and never names this one), same pattern as
+; test_driver_async_oauth/.
+(executable
+ (name otlp_collector_async)
+ (modules otlp_collector_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-otlp.proto grpc grpc-async h2-async core async pbrt))
+
+(executable
+ (name test_otlp_async)
+ (modules test_otlp_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-otlp-async zerobus-otlp.proto zerobus-core core core_unix
+   async unix cohttp-async yojson alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_otlp_async.exe otlp_collector_async.exe)
+ (action
+  (run ./test_otlp_async.exe)))

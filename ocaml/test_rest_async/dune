@@ -1,0 +1,23 @@
+; Async REST test: Zerobus_rest_async against an in-process cohttp-async mock
+; playing both the OIDC token endpoint and the /insert endpoint (cleartext HTTP,
+; loopback). The Async counterpart of test_rest/test_rest_lwt.
+;
+; (optional) so the dir VANISHES on switches WITHOUT cohttp-async (e.g. the
+; canonical fl414, which keeps cohttp 6.0) instead of erroring — zerobus-rest-async
+; is itself optional on cohttp-async. It lights up on a cohttp-async-equipped
+; switch. NOT in CI's fl414 job (which targets specific dirs and never names this
+; one), same pattern as test_driver_async_oauth/.
+(executable
+ (name test_rest_async)
+ (modules test_rest_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-rest-async zerobus-core core async unix cohttp-async yojson
+   alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_rest_async.exe)
+ (action
+  (run ./test_rest_async.exe)))

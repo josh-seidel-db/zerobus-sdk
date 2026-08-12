@@ -1,0 +1,12 @@
+ZEROBUS OCAML — ASYNC REST parity (#6) — evidence
+switch         : fl414-rest-otlp-async (fl414 clone + cohttp-async 6.0; THROWAWAY, removed after)
+                 async v0.17.0, cohttp 6.0.0, cohttp-async 6.0.0, h2 0.10.0, grpc-async 0.2.0
+lib            : lib/rest/async/zerobus_rest_async.{ml,mli} (cohttp-async, Core/Async,
+                 Throttle.Sequencer token cache). Package zerobus-rest-async — (optional) on cohttp-async.
+test           : test_rest_async/test_rest_async.ml — cohttp-async mock playing BOTH
+                 /oidc/v1/token + /zerobus/v1/tables/<t>/insert (cleartext, loopback).
+result         : 8/8 GREEN
+  token_mints=1 (cached), basic_auth+bearer seen, 3 inserts (empty skipped),
+  JSON array body, path correct, non-2xx -> Server_status 400.
+note           : (optional) dune → VANISHES on canonical fl414 (no cohttp-async); NOT in CI.
+                 Same posture as test_driver_async_oauth. Lwt (test_rest) is the reference.

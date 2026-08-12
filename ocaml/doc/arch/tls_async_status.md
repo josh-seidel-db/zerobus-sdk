@@ -40,11 +40,41 @@ returns an honest error; on any switch with a compatible `tls-async` + `h2`, liv
 TLS lights up automatically with zero code change. The transport code is the same
 either way — only the connect duplex differs.
 
-**Remaining (optional):** a single switch that has BOTH the fl414 lib deps AND a
-compatible tls-async, so `dune test` can run an Async live-TLS test in-tree (today
-the live proof is the spike on its own switch). Also: built-in OAuth on the Async
-façade (needs cohttp-async; today the caller supplies a bearer via
-`headers_provider`).
+**In-tree test (2026-08-11, added):** there is an in-tree Async live-TLS test —
+`test_driver_async_tls/` (`tls_server_async.ml` self-signed h2 mock +
+`test_tls_async.ml`), the Async counterpart of `test_driver_eio/test_tls_eio.ml`.
+It drives the `Zerobus_async` façade over a REAL TLS 1.3 + ALPN-h2 handshake
+against a self-signed mock — no live service — and includes a **negative test**
+(a wrong cert fingerprint is rejected), so it proves real certificate
+verification, matching Eio. 4/4 green. Evidence:
+`test_driver_async_tls/EVIDENCE_TLS_ASYNC.txt`.
+
+There is, however, **no single switch with fl414's *exact* deps AND tls-async** —
+the upstream triangle forbids it: the lib needs `h2 = 0.12`, pinning h2 0.12
+forces `tls-async 0.17.0`, which pulls `async/core v0.15` (fl414 is v0.16) and
+drags `grpc-async` down to `0.1.0` (no `Grpc_async.Server` — so the mock drives
+`H2.Server_connection` by hand). So the test lives on its own throwaway switch
+(`fl414-tls-intree`), exactly as the Eio/spike dirs are switch-specific, and its
+dune is `(optional)` so it vanishes on switches without tls-async. The **one**
+change to the shipped lib to make this buildable: the Async transport now uses
+`Clock_ns`/`Time_ns` (present on both async v0.15 and v0.16) instead of
+`Time_float` (v0.16-only), making it async-version-portable — verified not to
+regress the 6 Async mock tests on fl414 (v0.16).
+
+**Built-in OAuth on Async (2026-08-11, added):** the façade now has `mint_token`
++ `with_stream_oauth` (client-credentials grant, token cache, mirrors the Lwt
+reference). Like live TLS, the HTTP backend is a dune `select` — on `cohttp-async`
++ yojson/uri/base64: present → `lib/async/oauth.real.ml` does the real token POST;
+absent → `oauth.dummy.ml` returns an honest error and the caller supplies a bearer
+via `with_stream`'s `headers_provider`. `Zerobus_async.oauth_available : bool`
+reports which. Kept optional (maintainer decision) so the canonical fl414 switch is
+unchanged — installing cohttp-async forces `cohttp 6.0 → 5.3` (proven benign: Lwt
+3/3, REST 8/8, async 3/3 on 5.3), and gRPC-only users shouldn't pay that. Test:
+`test_driver_async_oauth/test_oauth_async.ml` 6/6 (mock token endpoint; incl. cache
++ error-path). Evidence: `test_driver_async_oauth/EVIDENCE_OAUTH_ASYNC.txt`.
+
+**Remaining (optional):** none tracked for Async parity — live TLS, in-tree TLS
+test, and built-in OAuth are all done. (REST/OTLP remain Lwt-only by design.)
 
 ---
 

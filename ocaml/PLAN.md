@@ -4,6 +4,16 @@ Companion to `DESIGN.md`. This is the build plan: what to implement, in what
 order, with what acceptance criteria, given what the spikes have already proven.
 Section refs (§) point into `DESIGN.md`.
 
+> ⚠️ **Historical build plan — the SDK is now feature-complete.** The per-phase
+> statuses below (🟡 "designed, not built", ⬜ "not started", "deferred",
+> "pending") reflect the mid-build snapshot and are **stale**: all phases are done.
+> Every runtime (Lwt/Eio/Async) has a working transport + live TLS + built-in
+> OAuth + recovery; Proto/JSON/Arrow all run; REST and OTLP are built and tested.
+> For the current, accurate status see [`README.md`](README.md),
+> [`doc/concurrency.md`](doc/concurrency.md), and
+> [`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md). This file is kept
+> as the build-order record; do not read its ✅/🟡/⬜ marks as current state.
+
 **Status legend:** ✅ proven by a run spike · 🟡 designed, not built · ⬜ not started
 
 ---

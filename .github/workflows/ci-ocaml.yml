@@ -50,7 +50,7 @@ jobs:
       # contention and keeps failures easy to attribute.
       - name: Test (4.14 stack)
         run: |
-          for d in test_driver test_driver_async test_driver_arrow test_rest test_otlp; do
+          for d in test test_driver test_driver_async test_driver_arrow test_driver_async_arrow test_rest test_otlp; do
             echo "== dune test $d =="
             opam exec -- dune test "$d/"
           done
@@ -77,15 +77,23 @@ jobs:
           dune-cache: true
       - name: Install OCaml dependencies
         run: |
-          opam install -y --deps-only ./zerobus-core.opam ./zerobus-eio.opam
+          opam install -y --deps-only ./zerobus-core.opam ./zerobus-eio.opam \
+            ./zerobus-rest-eio.opam ./zerobus-otlp-eio.opam
           opam install -y ocaml-protoc
       - name: Build (Eio)
-        run: opam exec -- dune build lib/core/ lib/eio/
+        run: |
+          opam exec -- dune build \
+            lib/core/ lib/eio/ lib/rest/eio/ lib/otlp/proto/ lib/otlp/eio/
       - name: Build example (Eio)
         run: opam exec -- dune build examples/json_loop_then_flush_eio.exe
       - name: Test (Eio)
-        run: opam exec -- dune test test_driver_eio/
+        run: |
+          for d in test_driver_eio test_rest_eio test_otlp_eio; do
+            echo "== dune test $d =="
+            opam exec -- dune test "$d/"
+          done
       - name: opam lint
         run: |
-          opam lint zerobus-core.opam
-          opam lint zerobus-eio.opam
+          for f in zerobus-core zerobus-eio zerobus-rest-eio zerobus-otlp-eio; do
+            opam lint "$f.opam"
+          done

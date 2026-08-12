@@ -121,6 +121,15 @@ let decode_ack (s : string) : (Stream.ack, Error.t) result =
       in
       match w with
       | Some w -> Ok (Stream.Watermark w)
-      | None -> Error (Error.Protocol_error "PutResult app_metadata not an offset"))
+      | None ->
+          (* A PutResult with empty / non-offset app_metadata is NOT fatal: the
+             server may send a schema-accept, heartbeat, or otherwise metadata-less
+             frame that carries no ack watermark. Treat it as [Created] (keep
+             reading) — the Ephemeral protocol's equivalent — rather than a
+             Protocol_error that would kill the whole Arrow stream on the first such
+             frame. Surfaced to observers via [on_ack]-adjacent logging is left to
+             the caller; here we simply do not advance the watermark. *)
+          Ok Stream.Created)
   | exception Pbrt.Decoder.Failure _ ->
+      (* A frame that isn't even a decodable PutResult is a genuine wire fault. *)
       Error (Error.Protocol_error "could not decode PutResult")

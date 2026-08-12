@@ -42,7 +42,11 @@ module Scope = struct
         (* Best-effort join, bounded so an uncancellable daemon can't hang exit. *)
         Deferred.any
           [ Deferred.all_unit scope.daemons;
-            Async.Clock.after (Time_float.Span.of_ms 0.) ])
+            (* [Time_ns]/[Clock_ns] (not [Time_float]) so the transport compiles on
+               BOTH async v0.16 (fl414, canonical) and async v0.15 — the latter is
+               forced by the tls-async 0.17.0 in-tree live-TLS test switch, where
+               [Time_float] is absent (see doc/arch/tls_async_status.md). *)
+            Async.Clock_ns.after (Time_ns.Span.of_ms 0.) ])
 
   let register (scope : t) (d : unit Deferred.t) =
     scope.daemons <- d :: scope.daemons
@@ -52,6 +56,13 @@ end
 
 let both (a : unit -> 'a t) (b : unit -> 'b t) : ('a * 'b) t =
   Deferred.both (a ()) (b ())
+
+(* First-wins race: Deferred.any returns the first branch to become determined.
+   Async has NO hard fiber cancellation, so the losing Deferred is simply detached
+   (same discipline as Scope / fork_daemon) — callers keep loser side effects
+   harmless when abandoned, as {!Io.IO.first} documents. *)
+let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t =
+  Deferred.any [ a (); b () ]
 
 let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
   (* Race the daemon body against the scope's stop signal so scope exit can
@@ -297,11 +308,14 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
   let shutdown (conn : connection) : unit io = conn.shutdown_conn ()
 end
 
-let sleep secs = after (Time_float.Span.of_sec secs)
+(* [Time_ns] (not [Time_float]) for v0.15/v0.16 portability — see the note in
+   [Scope.with_scope] above. [after] here is [Async.Clock_ns.after]. *)
+let sleep secs = Async.Clock_ns.after (Time_ns.Span.of_sec secs)
 
-(* Apply the core Make functor to this Async instantiation, exposing the stream
-   driver — the counterpart of {!Zerobus_io_lwt.Stream} / {!Zerobus_io_eio.Stream}. *)
-module Stream = Zerobus_core.Make (struct
+(* The Async {!Zerobus_core.Io.IO} instantiation, named (not inlined) so it can
+   drive BOTH the default EphemeralStream driver and the Arrow/Flight driver —
+   mirrors {!Zerobus_io_lwt.Io_impl} / {!Zerobus_io_eio.Io_impl}. *)
+module Io_impl = struct
   type nonrec 'a t = 'a t
   type 'a io = 'a t
   let return = return
@@ -309,11 +323,23 @@ module Stream = Zerobus_core.Make (struct
   let map = map
   module Scope = Scope
   let both = both
+  let first = first
   let fork_daemon = fork_daemon
   module Mutex = Mutex
   module Mailbox = Mailbox
   module H2_client = H2_client
   let sleep = sleep
-end)
+end
+
+(* Default driver: the [EphemeralStream] protocol (JSON/Proto). Counterpart of
+   {!Zerobus_io_lwt.Stream} / {!Zerobus_io_eio.Stream}. *)
+module Stream = Zerobus_core.Make (Io_impl)
+
+(* Arrow/Flight driver: same Async IO, the Flight [DoPut] protocol. Used by the
+   façade when [record_type = Arrow]; needs no libarrow ([Flight_protocol] carries
+   the IPC bytes opaquely, the caller supplies them via the zerobus-arrow codec) —
+   mirrors {!Zerobus_io_lwt.Stream_flight} / {!Zerobus_io_eio.Stream_flight}. *)
+module Stream_flight =
+  Zerobus_core.Stream.Make_with_protocol (Io_impl) (Zerobus_core.Flight_protocol)
 
 type stream_handle = Stream.stream

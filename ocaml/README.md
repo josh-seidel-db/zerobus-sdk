@@ -53,6 +53,38 @@ round-trip.
   record must be confirmed durable before continuing.
 - Prefer the batch API (`ingest_records`) in hot paths.
 
+### Flow control (no data loss)
+
+Because `ingest` returns before the record is durable, the driver keeps an
+**un-acked replay buffer** so it can re-send after a reconnect. That buffer is
+bounded — by `max_inflight_requests` (a record count) and `max_inflight_bytes` (a
+byte ceiling) — but **a record is never dropped to stay within the bound.** When
+the buffer is full, `overflow_policy` decides what `ingest` does:
+
+- **`Block`** (default) — apply backpressure: `ingest` waits until acknowledgements
+  drain the buffer, then queues the record. Fast producers are throttled to the
+  server's ack rate; nothing is lost.
+- **`Fail`** — `ingest` returns `Error (Backpressure _)` instead of blocking, so
+  your code decides (retry later, slow down, or deliberately drop). The buffer is
+  never silently truncated.
+
+```ocaml
+let options =
+  { Zerobus.default_stream_options with
+    record_type = Zerobus_core.Options.Json;
+    overflow_policy = Zerobus_core.Options.Fail;   (* or Block, the default *)
+    max_inflight_requests = 100_000;
+    max_inflight_bytes = None;                      (* None = smart, memory-derived *)
+  }
+```
+
+`max_inflight_bytes = None` derives a budget from the process's available memory
+(a fraction of free RAM, clamped to a safe range), so a capable machine buffers far
+more than the 1M-record count cap without risking an out-of-memory — set an explicit
+value to pin it. `Backpressure` is **not** a stream failure (the stream stays
+healthy and recovery is not triggered); just retry the `ingest` after a `flush` or a
+short wait.
+
 ## Interfaces
 
 The gRPC streaming SDK is the primary interface; two thin optional helpers cover
@@ -61,8 +93,13 @@ the low-frequency and OpenTelemetry cases.
 | Interface | Module | Package | Use when |
 |---|---|---|---|
 | gRPC streaming | `Zerobus` (Lwt), `Zerobus_eio`, `Zerobus_async` | `zerobus`, `zerobus-eio`, `zerobus-async` | High-volume, long-lived producers |
-| REST | `Zerobus_rest` | `zerobus-rest` | Infrequent / edge reporting, webhooks |
-| OTLP | `Zerobus_otlp` | `zerobus-otlp` | Already emitting OpenTelemetry logs/metrics |
+| REST | `Zerobus_rest` (Lwt), `Zerobus_rest_eio`, `Zerobus_rest_async` | `zerobus-rest`, `zerobus-rest-eio`, `zerobus-rest-async` | Infrequent / edge reporting, webhooks |
+| OTLP | `Zerobus_otlp` (Lwt), `Zerobus_otlp_eio`, `Zerobus_otlp_async` | `zerobus-otlp`, `zerobus-otlp-eio`, `zerobus-otlp-async` | Already emitting OpenTelemetry logs/metrics |
+
+Each interface is available on all three runtimes (Lwt is the reference). The Eio
+REST/OTLP packages need OCaml 5.x; the Async REST/OTLP packages are optional and
+build only where `cohttp-async` is installed (same posture as the Async built-in
+OAuth — see the runtime notes below).
 
 ### Record types
 
@@ -84,8 +121,11 @@ packages. Pick the one matching your app's concurrency library:
   client-credentials OAuth.
 - **`zerobus-eio` (Eio)** — OCaml 5.x, direct style. Bracket-shaped façade
   (`with_stream` / `with_stream_oauth`).
-- **`zerobus-async` (Async)** — bracket-shaped façade with caller-supplied auth
-  headers (built-in OAuth + live TLS are follow-ups; Lwt is the TLS reference).
+- **`zerobus-async` (Async)** — bracket-shaped façade (`with_stream` /
+  `with_stream_oauth`). Built-in client-credentials OAuth and live TLS are both
+  optional (dune `select`s on `cohttp-async` and `tls-async`): present → they work;
+  absent → supply a bearer via `with_stream`'s `headers_provider` and use cleartext
+  (Lwt/Eio are the always-on TLS references).
 
 See [`examples/json_loop_then_flush_eio.ml`](examples/json_loop_then_flush_eio.ml)
 for the Eio (direct-style) shape.
@@ -117,6 +157,9 @@ The repo uses two opam switches — 4.14 (Lwt / Async) and 5.x (Eio). From `ocam
 # 4.14 switch (Lwt, Async, REST, OTLP, Arrow):
 dune build lib/core/ lib/lwt/ lib/async/ lib/arrow/ lib/rest/ lib/otlp/
 dune test  test_driver/ test_driver_async/ test_driver_arrow/ test_rest/ test_otlp/
+# Arrow tests (incl. test_driver_async_arrow) need: export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+# Async live-TLS / built-in-OAuth tests need a switch with tls-async / cohttp-async
+# (optional deps) — see doc/arch/tls_async_status.md.
 
 # 5.x switch (Eio):
 dune build lib/core/ lib/eio/

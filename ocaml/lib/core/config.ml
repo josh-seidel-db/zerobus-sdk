@@ -55,66 +55,113 @@ let workspace_id_of_url (url : string) : (string, Error.t) result =
   with
   | _ -> Error (Error.Transport_error "failed to parse workspace_url")
 
-(** Derive the gRPC endpoint host from workspace URL and optional region.
+(* Strip a leading scheme and any trailing path/port, returning the bare host. *)
+let host_of_url (url : string) : string =
+  let s =
+    if String.starts_with ~prefix:"https://" url then
+      String.sub url 8 (String.length url - 8)
+    else if String.starts_with ~prefix:"http://" url then
+      String.sub url 7 (String.length url - 7)
+    else url
+  in
+  (* drop path and port *)
+  let s = match String.index_opt s '/' with Some i -> String.sub s 0 i | None -> s in
+  match String.index_opt s ':' with Some i -> String.sub s 0 i | None -> s
 
-    Given a workspace URL like https://adb-...eastus2.-azuredatabricks.net,
-    derives the gRPC endpoint as <workspace-id>.zerobus.<region>.cloud.databricks.com
-    (or the region-specific variant for Azure: <workspace-id>.zerobus.<region>.azuredatabricks.net).
+(* The three Databricks clouds and their Zerobus endpoint domain suffixes. The
+   Zerobus gRPC host is [<workspace-id>.zerobus.<region>.<suffix>]. *)
+type cloud = AWS | Azure | GCP
 
-    If [endpoint] is provided and is not empty, it is validated and returned as-is.
-    Otherwise, the endpoint is derived from [workspace_url].
+let ends_with host suf =
+  let ls = String.length suf and lh = String.length host in
+  lh >= ls && String.sub host (lh - ls) ls = suf
 
-    Returns [(host, port)].
-*)
+let cloud_of_host host : cloud option =
+  (* Order matters: the more specific GCP suffix before AWS's cloud.databricks.com. *)
+  if ends_with host ".gcp.databricks.com" then Some GCP
+  else if ends_with host ".azuredatabricks.net" then Some Azure
+  else if ends_with host ".cloud.databricks.com" then Some AWS
+  else None
+
+let zerobus_suffix = function
+  | AWS -> "cloud.databricks.com"
+  | Azure -> "azuredatabricks.net"
+  | GCP -> "gcp.databricks.com"
+
+let cloud_name = function AWS -> "AWS" | Azure -> "Azure" | GCP -> "GCP"
+
+(* Pull the region out of a host IFF it is already a zerobus-form host, i.e.
+   [<id>.zerobus.<region>.<suffix>...]. Region is NOT present in a plain console
+   workspace host (AWS [dbc-xxx.cloud.databricks.com], Azure
+   [adb-<id>.<n>.azuredatabricks.net]) — those carry no region, which is why the
+   reference SDKs require an explicit endpoint. Returns [Some region] only when the
+   [.zerobus.] marker is present. *)
+let region_of_zerobus_host host : string option =
+  let parts = String.split_on_char '.' host in
+  let rec find = function
+    | "zerobus" :: region :: _ when String.length region > 0 -> Some region
+    | _ :: rest -> find rest
+    | [] -> None
+  in
+  find parts
+
+(** Derive the gRPC endpoint [(host, port)] from an explicit [endpoint] or from
+    [workspace_url].
+
+    - If [endpoint] is a non-empty, non-["default"] value it is used verbatim
+      (host or host:port) — the reliable path, matching every other Zerobus SDK,
+      which require an explicit endpoint.
+    - Otherwise we DERIVE. The Zerobus host is
+      [<workspace-id>.zerobus.<region>.<cloud-suffix>] with suffix
+      [cloud.databricks.com] (AWS), [azuredatabricks.net] (Azure), or
+      [gcp.databricks.com] (GCP), detected from [workspace_url]. Derivation needs a
+      REGION, which a plain console workspace URL usually does NOT contain; we can
+      only recover it when [workspace_url] is itself already a zerobus-form host. If
+      the cloud is unknown or the region can't be determined, we return a precise
+      [Transport_error] telling the caller the exact template to pass as [endpoint]
+      — NEVER a silently-wrong host (the previous bug, which hard-coded AWS and mis-
+      picked the region for Azure/GCP). *)
 let endpoint_of_workspace ~endpoint ~workspace_url : (string * int, Error.t) result =
-  (* If endpoint is explicitly provided, use it *)
   if endpoint <> "" && endpoint <> "default" then begin
-    (* Parse host:port or just host *)
     match String.split_on_char ':' endpoint with
     | [ host; port_str ] ->
-        (try
-          let port = int_of_string port_str in
-          Ok (host, port)
-        with _ ->
-          Error (Error.Transport_error
-            (Printf.sprintf "invalid port in endpoint: %s" endpoint)))
+        (try Ok (host, int_of_string port_str)
+         with _ ->
+           Error (Error.Transport_error
+             (Printf.sprintf "invalid port in endpoint: %s" endpoint)))
     | [ host ] -> Ok (host, 443)
     | _ -> Error (Error.Transport_error
         (Printf.sprintf "invalid endpoint format: %s" endpoint))
   end else begin
-    (* Derive from workspace_url *)
     match workspace_id_of_url workspace_url with
     | Error _ as e -> e
     | Ok wsid ->
-
-    (* Extract region from workspace_url. Common patterns:
-       - eastus2, westus2, etc. (Azure)
-       - us-west-2, us-east-1, etc. (AWS)
-       - us-central1, etc. (GCP)
-    *)
-    let region =
-      try
-        let url =
-          if String.starts_with ~prefix:"https://" workspace_url then
-            String.sub workspace_url 8 (String.length workspace_url - 8)
-          else
-            workspace_url
-        in
-        let parts = String.split_on_char '.' url in
-        (* Look for region-like parts: typically 2nd component after workspace-id *)
-        match parts with
-        | [ _first; second; _ ] -> Some second
-        | _first :: second :: _ when String.length second > 0 -> Some second
-        | _ -> None
-      with _ -> None
-    in
-
-    let region = match region with Some r -> r | None -> "us-west-2" in
-    (* NOTE: This assumes AWS cloud (.cloud.databricks.com). Azure endpoints use
-       .azuredatabricks.net. For production use with non-AWS clouds, pass an
-       explicit endpoint parameter instead of relying on derivation. *)
-    let host = Printf.sprintf "%s.zerobus.%s.cloud.databricks.com" wsid region in
-    Ok (host, 443)
+        let host = host_of_url workspace_url in
+        (* If the workspace_url is already a zerobus host, use it directly. *)
+        if region_of_zerobus_host host <> None then Ok (host, 443)
+        else
+          match cloud_of_host host with
+          | None ->
+              Error (Error.Transport_error
+                (Printf.sprintf
+                   "cannot derive a Zerobus endpoint from workspace_url %S \
+                    (unrecognized cloud). Pass an explicit endpoint like \
+                    <workspace-id>.zerobus.<region>.<cloud-suffix>."
+                   workspace_url))
+          | Some cloud -> (
+              match region_of_zerobus_host host with
+              | Some region ->
+                  Ok (Printf.sprintf "%s.zerobus.%s.%s" wsid region
+                        (zerobus_suffix cloud), 443)
+              | None ->
+                  (* Region absent from a console workspace URL — do NOT guess. *)
+                  Error (Error.Transport_error
+                    (Printf.sprintf
+                       "cannot derive the %s Zerobus endpoint from workspace_url \
+                        %S: the region is not present in the workspace URL. Pass an \
+                        explicit endpoint: %s.zerobus.<region>.%s"
+                       (cloud_name cloud) workspace_url wsid
+                       (zerobus_suffix cloud))))
   end
 
 (** Build the OAuth 2.0 client-credentials token request body (DESIGN.md §12.2).

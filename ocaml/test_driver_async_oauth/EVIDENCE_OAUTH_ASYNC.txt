@@ -1,0 +1,81 @@
+ZEROBUS OCAML — Async built-in client-credentials OAuth
+========================================================
+Date: 2026-08-11. Adds built-in OAuth to the Async runtime façade — the last of
+the deferred Async parity items after live TLS was solved. The Async counterpart
+of the Lwt Zerobus.create_stream / Eio Zerobus_eio.with_stream_oauth.
+
+WHAT THIS IS
+------------
+- lib/async/zerobus_async.ml gains:
+    mint_token ~client ~table ~client_id ~client_secret
+      : client-credentials grant, POST <workspace_url>/oidc/v1/token, id/secret in
+        the HTTP Basic header, request body from Zerobus_core.Config
+        (grant_type=client_credentials + Zerobus scope/resource + table UC
+        authorization_details). Token CACHED with expiry, refreshed ~30s early,
+        guarded by the client's Io_async.Mutex (Sequencer, concurrency 1) so
+        concurrent mints don't stampede the endpoint. Mirrors the Lwt reference.
+    with_stream_oauth client table ~client_id ~client_secret ?options f
+      : ergonomic bracket — mint -> bearer+table headers -> with_stream ~tls:true.
+    oauth_available : bool   (true iff cohttp-async was present at build time).
+  Client record `t` gained `mutable token_cache` + `token_cache_lock`.
+
+PACKAGING — cohttp-async is OPTIONAL (a dune [select]), by maintainer decision
+------------------------------------------------------------------------------
+Built-in OAuth needs an HTTP client (cohttp-async + yojson/uri/base64). Installing
+cohttp-async forces cohttp 6.0 -> 5.3 on the switch. To keep the CANONICAL fl414
+switch (all other green tests) unchanged and NOT force that downgrade on gRPC-only
+users, the HTTP backend is a dune [select] (mirrors the tls-async live-TLS select):
+    lib/async/oauth.real.ml   (cohttp-async yojson uri base64 present) — real POST
+    lib/async/oauth.dummy.ml  (absent) — honest error; caller passes a bearer via
+                              with_stream's headers_provider instead.
+  lib/async/dune: (select oauth.ml from (cohttp-async yojson uri base64 ->
+                   oauth.real.ml) (-> oauth.dummy.ml)).
+  dune-project depopts += cohttp-async yojson uri base64 (opam regenerated).
+So: fl414 keeps cohttp 6.0 and oauth_available=false (dummy); a cohttp-async switch
+lights up real OAuth with the SAME façade code.
+
+COHTTP-ASYNC DE-RISK (the memory's "cohttp downgrade risk" — RESOLVED, benign)
+-----------------------------------------------------------------------------
+On a throwaway clone of fl414's EXACT set (async v0.16, h2 0.12, core v0.16),
+`opam install cohttp-async` resolved to: async v0.16 UNCHANGED, h2 0.12 UNCHANGED,
+cohttp 6.0 -> 5.3.1 + cohttp-async 5.3.0 + cmdliner 2.1->1.3. Then, on that
+cohttp-5.3 config, ALL of these built + passed:
+    - lib/core + lib/lwt + lib/async : build clean
+    - test_driver/test_driver_lwt    : 3/3  (Lwt streaming unaffected by cohttp 5.3)
+    - test_rest/test_rest_lwt        : 8/8  (the package MOST exposed to cohttp —
+                                             cohttp-lwt-unix — survives the downgrade)
+    - test_driver_async/test_facade_async : 3/3
+So the cohttp 5.3 downgrade is API-compatible for everything the SDK uses. (Note:
+on a fresh/unpinned solve cohttp-async also happily coexists with the LATEST
+async v0.17 + h2 0.10 — also built + tested green — so the dep is satisfiable
+either way; the select simply avoids forcing ANY change on gRPC-only users.)
+
+TEST RESULT (throwaway switch fl414-cohttp-async; cohttp-async present):
+  test_driver_async_oauth/test_oauth_async.ml — mock cohttp-async token endpoint,
+  cleartext http (same request-build -> POST -> JSON-parse path as live HTTPS; TLS
+  wrapper is orthogonal, covered by test_driver_async_tls). Evidence:
+    token_minted       : true
+    body_has_grant_type: true      (grant_type=client_credentials in the POST body)
+    auth_header_basic  : true      (Authorization: Basic <b64 id:secret>)
+    token_cached_2nd   : true      (2nd mint returns same token)
+    endpoint_hits      : 1         (2nd mint served from CACHE, endpoint hit once)
+    bad_endpoint_error : Auth_error: token endpoint HTTP 401   (error path)
+  Testing `async-oauth' — 6/6 [OK]. (Exceeds test_oauth_eio's 4 cases: adds the
+  cache + error-path assertions.)
+
+REGRESSION (all green)
+----------------------
+- fl414 (canonical, NO cohttp-async): lib/async builds with the DUMMY oauth backend
+  (oauth_available=false verified via _build/.../oauth.ml); 6 Async mock tests
+  (test_driver_async 3/3, test_facade_async 3/3) still pass; CI's fl414 build step
+  (named dirs) clean; cohttp stays 6.0 (untouched). test_driver_async_oauth/ is
+  (optional) so it's skipped there (same pattern as test_driver_async_tls/), not in CI.
+- cohttp-async clone: real backend, OAuth 6/6 + Lwt/REST/async all green as above.
+
+NOT covered (parity with Eio, deliberately): with_stream_oauth itself forces
+~tls:true (live path) so it isn't exercised against the cleartext mock — only
+mint_token is (same as test_oauth_eio). The with_stream_oauth glue (mint -> headers
+-> with_stream) is trivial and type-checked.
+
+CLEANUP: fl414-cohttp-async is a throwaway switch; remove when done
+(`opam switch remove fl414-cohttp-async`). No cloud resources involved.

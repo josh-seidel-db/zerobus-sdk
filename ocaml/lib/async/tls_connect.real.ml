@@ -9,13 +9,33 @@ open! Async
 
 let available = true
 
+(* Optional cert-fingerprint pin. When set to [Some "<sha256-b64>"], the TLS peer
+   is authenticated by pinning that exact certificate fingerprint INSTEAD OF the
+   system trust store ([Ca_certs]). This exists so an in-tree test can verify the
+   real TLS 1.3 + ALPN-h2 path against a self-signed h2 mock (system anchors can't
+   validate a self-signed cert) — mirroring the Eio transport's [Ctx] authenticator
+   override. Kept a bare [string ref] (not an [X509]/[tls] type) so the SHARED
+   [tls_connect] signature stays tls-free and [tls_connect.dummy.ml] compiles on
+   switches without tls. Prod leaves it [None] → [Ca_certs]. *)
+let pinned_cert_fp_sha256_b64 : string option ref = ref None
+
 (* Returns (reader, writer, shutdown) on success. [shutdown] closes the writer. *)
 let connect ~host ~port :
     (Reader.t * Writer.t * (unit -> unit Deferred.t), string) Deferred.Result.t =
   let authenticator =
-    match Ca_certs.authenticator () with
-    | Ok a -> a
-    | Error (`Msg m) -> failwith ("ca-certs: " ^ m)
+    match !pinned_cert_fp_sha256_b64 with
+    | Some fp -> (
+        (* Pin the peer's self-signed cert by fingerprint (test path). This still
+           exercises the full real TLS handshake + ALPN negotiation. *)
+        match
+          X509.Authenticator.of_string (Printf.sprintf "cert-fp:sha256:%s" fp)
+        with
+        | Ok a -> a (fun () -> Some (Ptime_clock.now ()))
+        | Error (`Msg m) -> failwith ("cert-fp authenticator: " ^ m))
+    | None -> (
+        match Ca_certs.authenticator () with
+        | Ok a -> a
+        | Error (`Msg m) -> failwith ("ca-certs: " ^ m))
   in
   let peer_name =
     match Domain_name.of_string host with

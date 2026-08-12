@@ -25,7 +25,9 @@ module Wire = Zerobus_proto.Zerobus_service
 type ack =
   | Watermark of int64  (** durability watermark: all offsets <= n are durable *)
   | Created  (** stream/schema accepted; not an ack, keep reading *)
-  | Closed  (** server signalled end-of-stream *)
+  | Closed of int
+      (** server signalled it will close the stream in [n] ms (0 if the signal
+          carried no duration). Honored via [stream_paused_max_wait_time_ms]. *)
 
 (** The on-the-wire protocol the driver runs over. Everything else in the driver
     (offsets, watermark, waiters, recovery, replay buffer) is protocol-agnostic. *)
@@ -88,7 +90,19 @@ module Ephemeral : PROTOCOL = struct
     | Wire.Ingest_record_response ack ->
         Ok (Watermark ack.Wire.durability_ack_up_to_offset)
     | Wire.Create_stream_response _ -> Ok Created
-    | Wire.Close_stream_signal _ -> Ok Closed
+    | Wire.Close_stream_signal sig_ ->
+        (* The server may attach a Duration: how long until it closes. Surface it
+           as ms so the driver can honor [stream_paused_max_wait_time_ms]. *)
+        let ms =
+          match sig_.Wire.duration with
+          | Some d ->
+              Int64.to_int
+                (Int64.add
+                   (Int64.mul d.Zerobus_proto.Duration.seconds 1000L)
+                   (Int64.of_int32 (Int32.div d.Zerobus_proto.Duration.nanos 1_000_000l)))
+          | None -> 0
+        in
+        Ok (Closed ms)
     | exception Pbrt.Decoder.Failure _ ->
         Error (Error.Protocol_error "could not decode EphemeralStreamResponse")
 end
@@ -97,6 +111,21 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
   open Io
 
   let ( let* ) = bind
+
+  (* Race a result-producing computation against a timer: return [f]'s result if it
+     finishes within [ms], else [Error (Timeout ...)]. [ms <= 0] disables the timer
+     (runs [f] unbounded). Built on {!Io.first} (abandons the loser — on Lwt/Eio the
+     loser is cancelled; on Async detached, so [f] must be safe to abandon). *)
+  let with_timeout ~ms ~(label : string) (f : unit -> ('a, Error.t) result Io.t) :
+      ('a, Error.t) result Io.t =
+    if ms <= 0 then f ()
+    else
+      Io.first f (fun () ->
+          let* () = Io.sleep (float_of_int ms /. 1000.) in
+          return
+            (Error
+               (Error.Timeout
+                  (Printf.sprintf "%s timed out after %dms" label ms))))
 
   type offset = Options.offset
 
@@ -126,14 +155,37 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
     mutable fatal : Error.t option;  (* set on a fatal stream/transport error *)
     mutable closed : bool;
     mutable waiters : waiter list;  (* pending wait_for_offset / flush waiters *)
-    (* Un-acked replay buffer for recovery (§12.3), bounded by
-       max_inflight_requests: (offset, framed-bytes) from last_acked+1 forward. *)
+    (* Un-acked replay buffer for recovery (§12.3): (offset, framed-bytes) from
+       last_acked+1 forward, newest first. Bounded by [max_inflight_requests] AND
+       [inflight_limit_bytes] — but NEVER dropped (see [overflow_policy]). *)
     mutable unacked : (int64 * string) list;  (* newest first *)
+    mutable unacked_bytes : int;  (* running byte total of [unacked] (O(1) upkeep) *)
+    inflight_limit_bytes : int;  (* byte ceiling, resolved at open from options/mem *)
+    (* Producers parked by [overflow_policy = Block] until the ack-reader drains the
+       buffer below the bound; woken (capacity-1 box each) when space frees up. *)
+    mutable space_waiters : unit Mailbox.t list;
   }
 
-  (* Drop replay-buffer entries at or below [watermark] (they are durable now). *)
+  (* Drop replay-buffer entries at or below [watermark] (they are durable now) and
+     keep [unacked_bytes] in sync. Runs under state_lock. *)
   let prune_unacked s watermark =
-    s.unacked <- List.filter (fun (off, _) -> off > watermark) s.unacked
+    let kept, freed =
+      List.fold_left
+        (fun (kept, freed) (off, framed) ->
+          if off > watermark then ((off, framed) :: kept, freed)
+          else (kept, freed + String.length framed))
+        ([], 0) s.unacked
+    in
+    (* fold reverses order; restore newest-first *)
+    s.unacked <- List.rev kept;
+    s.unacked_bytes <- s.unacked_bytes - freed
+
+  (* Collect the space-waiter boxes to wake (called after pruning frees room). Runs
+     under state_lock; the boxes are [put] outside the lock by the caller. *)
+  let take_space_waiters s =
+    let ws = s.space_waiters in
+    s.space_waiters <- [];
+    ws
 
   (* Wake every waiter whose target the watermark has now reached, and drop them.
      Runs under state_lock. Returns the boxes to notify (notify outside the lock). *)
@@ -144,12 +196,15 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
     s.waiters <- pending;
     List.map (fun w -> w.mbox) ready
 
-  (* On a fatal error: record it, wake all waiters (they observe [fatal]). *)
+  (* On a fatal error: record it, wake all waiters (they observe [fatal]). Returns
+     the (waiter-target, box) list so the caller can both notify the boxes AND fire
+     [on_error] per pending offset OUTSIDE the state lock (the callback is user code;
+     never run it under a lock — same discipline as [on_ack]). *)
   let fail_all s err =
     if s.fatal = None then s.fatal <- Some err;
-    let boxes = List.map (fun w -> w.mbox) s.waiters in
+    let failed = List.map (fun w -> (w.target, w.mbox)) s.waiters in
     s.waiters <- [];
-    boxes
+    failed
 
   (* put () to each waiter box; capacity-1 mailbox, never blocks *)
   let notify_all boxes =
@@ -160,6 +215,28 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
           go rest
     in
     go boxes
+
+  (* Handle the (target, box) list from [fail_all]: fire the [on_error] callback for
+     each failed offset (if registered), then wake every waiter box AND every
+     backpressure space-waiter (a [Block]-parked producer must un-park on failure,
+     re-check [s.fatal], and return the error instead of hanging forever). Callback
+     runs here, OUTSIDE the state lock. *)
+  let notify_failed s err (failed : (int64 * unit Mailbox.t) list) =
+    (match s.options.Options.ack_callback with
+     | Some cb ->
+         List.iter
+           (fun (target, _) ->
+             cb.Options.on_error (Options.offset_of_int64 target) (Error.to_string err))
+           failed
+     | None -> ());
+    let* space_boxes =
+      Mutex.with_lock s.state_lock (fun () ->
+          let ws = s.space_waiters in
+          s.space_waiters <- [];
+          return ws)
+    in
+    let* () = notify_all (List.map snd failed) in
+    notify_all space_boxes
 
   (* Re-open the bidi RPC and replay the un-acked tail in order (§12.3). Runs
      under [send_lock] so no concurrent [ingest] send races the swap. Returns Ok
@@ -221,16 +298,25 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
             try_recover (attempt + 1) next err'
     in
     let advance_watermark watermark =
-      let* boxes =
+      let* advanced, boxes, space_boxes =
         Mutex.with_lock s.state_lock (fun () ->
-            if watermark > s.last_acked then s.last_acked <- watermark;
+            (* Guard monotonicity: a duplicate or out-of-order (<=) watermark must
+               NOT move [last_acked] backward nor re-fire the callback — callers
+               rely on "durable up to N" being monotonically non-decreasing. *)
+            let advanced = watermark > s.last_acked in
+            if advanced then s.last_acked <- watermark;
             prune_unacked s s.last_acked;
-            return (collect_ready_waiters s))
+            (* Pruning freed replay-buffer room; wake any producers parked by the
+               Block overflow policy so they can re-check and proceed. *)
+            return (advanced, collect_ready_waiters s, take_space_waiters s))
       in
-      (match s.options.Options.ack_callback with
-       | Some cb -> cb.Options.on_ack (Options.offset_of_int64 watermark)
-       | None -> ());
-      notify_all boxes
+      (* Fire [on_ack] only when the watermark actually advanced, and with the new
+         [last_acked] (== watermark here) — never a stale/decreasing value. *)
+      (match (advanced, s.options.Options.ack_callback) with
+       | true, Some cb -> cb.Options.on_ack (Options.offset_of_int64 s.last_acked)
+       | _ -> ());
+      let* () = notify_all boxes in
+      notify_all space_boxes
     in
     let rec loop () : unit Io.t =
       (* capture the call we're reading so its final status is the one we check on
@@ -245,8 +331,22 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
           let* st = Io.H2_client.status this_call in
           (match st with
            | Ok () ->
-               let* boxes = Mutex.with_lock s.state_lock (fun () -> return (collect_ready_waiters s)) in
-               notify_all boxes
+               (* Clean server end. Any waiter still pending (target > last_acked)
+                  will NEVER be satisfied — the ack-reader is terminating and no more
+                  acks are coming. Fail those fast (firing on_error) instead of
+                  leaving flush/wait_for_offset to block until their own timeout. If
+                  none pend, this is a normal clean close (empty fail list). *)
+               let err =
+                 Error.Stream_error "server closed the stream before all records acked"
+               in
+               let* failed =
+                 Mutex.with_lock s.state_lock (fun () ->
+                     (* Only mark fatal when waiters actually pend; a clean close with
+                        nothing outstanding must NOT poison [s.fatal]. *)
+                     if s.waiters = [] then return []
+                     else return (fail_all s err))
+               in
+               notify_failed s err failed
            | Error err -> on_failure err)
       | Ok (Some raw) -> (
           match P.decode_ack raw with
@@ -254,9 +354,7 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
               let* () = advance_watermark watermark in
               loop ()
           | Ok Created -> loop ()
-          | Ok Closed ->
-              let* boxes = Mutex.with_lock s.state_lock (fun () -> return (collect_ready_waiters s)) in
-              notify_all boxes
+          | Ok (Closed server_ms) -> on_close server_ms
           | Error err -> on_failure err)
       | Error err -> on_failure err
     and on_failure err =
@@ -265,8 +363,79 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
       in
       if recovered then loop ()
       else
-        let* boxes = Mutex.with_lock s.state_lock (fun () -> return (fail_all s err)) in
-        notify_all boxes
+        let* failed = Mutex.with_lock s.state_lock (fun () -> return (fail_all s err)) in
+        notify_failed s err failed
+    (* Reconnect+replay after a graceful close, through the SAME bounded, retryable
+       recovery path as [on_failure] (capped by [recovery_retries], gated on
+       [is_retryable]) so a server that repeatedly closes freshly-opened streams
+       cannot drive an unbounded reconnect loop. If recovery is exhausted, fail ALL
+       waiters so nobody hangs. *)
+    and reconnect_after_close () =
+      let* recovered =
+        try_recover 1 s.options.Options.recovery_backoff_ms
+          (Error.Transport_error "server graceful close")
+      in
+      if recovered then loop ()
+      else
+        let err = Error.Stream_error "server closed the stream" in
+        let* failed =
+          Mutex.with_lock s.state_lock (fun () -> return (fail_all s err))
+        in
+        notify_failed s err failed
+    (* Drain acks on the closing stream until the server ends the body (recv=None),
+       advancing the (monotonic, idempotent) watermark as they arrive. Returns when
+       the body ends. Triggers NO reconnect itself, so it is safe to abandon (Async)
+       or cancel (Lwt/Eio) when the grace timer wins the race in [on_close]. *)
+    and drain_until_close () : (unit, Error.t) result Io.t =
+      let this_call = s.call in
+      let* r = Io.H2_client.recv this_call in
+      match r with
+      | Ok None -> return (Ok ())
+      | Ok (Some raw) -> (
+          match P.decode_ack raw with
+          | Ok (Watermark watermark) ->
+              let* () = advance_watermark watermark in
+              drain_until_close ()
+          | Ok Created -> drain_until_close ()
+          | Ok (Closed _) -> drain_until_close () (* already closing; keep draining *)
+          | Error _ -> return (Ok ()))
+      | Error _ -> return (Ok ())
+    (* Graceful close: the server signalled it will close the stream in [server_ms].
+       Honor [stream_paused_max_wait_time_ms]:
+       - recovery off (or a caller-initiated close): terminal — we cannot re-open, so
+         fail ALL outstanding waiters (not just the already-ready ones) with a
+         stream-closed error, so [wait_for_offset]/[flush] don't hang forever.
+       - [Some 0]: reconnect immediately (skip the grace window).
+       - [None]: drain in-flight acks until the server ends the body, then reconnect
+         (most graceful — bounded by the server's own close duration).
+       - [Some x > 0]: drain, but cap the wait at exactly [min (x, server_ms)] — race
+         the drain against a timer via {!with_timeout}/{!Io.first} (the reader is
+         single-threaded, so we cannot both keep reading AND time out without the
+         race). Either way we reconnect+replay once afterward via the bounded path.
+       Draining keeps the watermark advancing for acks the server sends before it ends
+       the body (genuine drain, not a blind sleep). *)
+    and on_close server_ms =
+      if (not o.Options.recovery) || s.closed then
+        let err =
+          Error.Stream_error "server closed the stream (recovery disabled)"
+        in
+        let* failed = Mutex.with_lock s.state_lock (fun () -> return (fail_all s err)) in
+        notify_failed s err failed
+      else
+        match o.Options.stream_paused_max_wait_time_ms with
+        | Some 0 -> reconnect_after_close ()
+        | None ->
+            let* _ = drain_until_close () in
+            reconnect_after_close ()
+        | Some x ->
+            let cap = if server_ms > 0 then min x server_ms else x in
+            (* Race the drain against a [cap]-ms deadline; whichever wins, reconnect.
+               [with_timeout] returns the drain's [Ok ()] or [Error Timeout] — both
+               lead to the same reconnect, so the timeout marker is just discarded. *)
+            let* _ =
+              with_timeout ~ms:cap ~label:"graceful-close drain" drain_until_close
+            in
+            reconnect_after_close ()
     in
     loop ()
 
@@ -277,7 +446,13 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
   let open_stream ~host ~port ~tls ~headers ~(options : Options.stream_options)
       ~(table : Options.table_properties) (scope : Scope.t) :
       (stream, Error.t) result Io.t =
-    let* conn_r = Io.H2_client.connect ~host ~port ~tls ~headers () in
+    (* Bound connection establishment by [connection_timeout_ms] (a hard deadline
+       via {!with_timeout}/{!Io.first}); on expiry the connect is abandoned and we
+       return [Timeout]. *)
+    let* conn_r =
+      with_timeout ~ms:options.Options.connection_timeout_ms ~label:"connect"
+        (fun () -> Io.H2_client.connect ~host ~port ~tls ~headers ())
+    in
     match conn_r with
     | Error _ as e -> return e
     | Ok conn -> (
@@ -292,6 +467,14 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
             match send_r with
             | Error _ as e -> return e
             | Ok () ->
+                (* Resolve the byte ceiling once, at open: explicit [max_inflight_bytes]
+                   or a smart budget from available memory ({!Mem_budget}). Never
+                   unbounded, never lossy. *)
+                let inflight_limit_bytes =
+                  match options.Options.max_inflight_bytes with
+                  | Some n when n > 0 -> n
+                  | _ -> Mem_budget.default_budget_bytes ()
+                in
                 let s =
                   {
                     call;
@@ -311,6 +494,9 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
                     closed = false;
                     waiters = [];
                     unacked = [];
+                    unacked_bytes = 0;
+                    inflight_limit_bytes;
+                    space_waiters = [];
                   }
                 in
                 fork_daemon scope (ack_reader s);
@@ -318,40 +504,84 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
 
   (* ---- ingestion (queue-only; never wait — the cardinal rule) ---- *)
 
-  let ingest_encoded (s : stream) (make : int64 -> string) :
+  (* Would adding a record of [n] bytes exceed EITHER inflight bound? (count / bytes) *)
+  let would_overflow s n =
+    List.length s.unacked >= s.options.Options.max_inflight_requests
+    || s.unacked_bytes + n > s.inflight_limit_bytes
+
+  (* Reserve a slot for a new [framed] record: assign its offset, append to the
+     replay buffer, bump byte total. Runs under state_lock. Returns the offset. *)
+  let reserve_slot s framed =
+    let off = s.next_offset in
+    s.next_offset <- Int64.add off 1L;
+    s.last_issued <- off;
+    s.unacked <- (off, framed) :: s.unacked;
+    s.unacked_bytes <- s.unacked_bytes + String.length framed;
+    off
+
+  (* Queue one record for sending. ALL of the fatal/closed guard, the no-loss
+     overflow decision, and the offset assignment happen atomically UNDER state_lock
+     (fixing the prior race where fatal/closed were read BEFORE locking, letting a
+     record slip onto an already-failed stream). Framing needs the offset and the
+     byte bound needs the frame size, so we peek the offset, frame, size-check, then
+     commit — all inside the one lock. Overflow NEVER drops: [Fail] returns
+     [Backpressure]; [Block] parks on a space-waiter and retries when the ack-reader
+     frees room. *)
+  let rec ingest_encoded (s : stream) (make : int64 -> string) :
       (offset, Error.t) result Io.t =
-    match s.fatal with
-    | Some e -> return (Error e)
-    | None ->
-        if s.closed then return (Error (Error.Stream_error "ingest after close"))
-        else
-          let* off, framed =
-            Mutex.with_lock s.state_lock (fun () ->
+    let* decision =
+      Mutex.with_lock s.state_lock (fun () ->
+          match s.fatal with
+          | Some e -> return (`Err e)
+          | None ->
+              if s.closed then return (`Err (Error.Stream_error "ingest after close"))
+              else
+                (* We must know the size to check the byte bound, but size depends on
+                   the frame which depends on the offset. Peek the offset without
+                   committing, frame, then decide. *)
                 let off = s.next_offset in
-                s.next_offset <- Int64.add off 1L;
-                s.last_issued <- off;
                 let framed = make off in
-                (* retain for replay, bounded by max_inflight_requests *)
-                s.unacked <- (off, framed) :: s.unacked;
-                if List.length s.unacked > s.options.Options.max_inflight_requests
-                then
-                  s.unacked <-
-                    (let rec take n = function
-                       | x :: xs when n > 0 -> x :: take (n - 1) xs
-                       | _ -> []
-                     in
-                     take s.options.Options.max_inflight_requests s.unacked);
-                return (off, framed))
-          in
-          (* send under send_lock so a concurrent recovery call-swap doesn't race
-             the write; [s.call] is read inside the lock. *)
-          let* send_r =
-            Mutex.with_lock s.send_lock (fun () ->
-                Io.H2_client.send s.call framed)
-          in
-          match send_r with
-          | Ok () -> return (Ok (Options.offset_of_int64 off))
-          | Error e -> return (Error e)
+                let n = String.length framed in
+                if would_overflow s n then
+                  match s.options.Options.overflow_policy with
+                  | Options.Fail ->
+                      return
+                        (`Err
+                          (Error.Backpressure
+                             (Printf.sprintf
+                                "un-acked buffer full (%d records / %d bytes, limit \
+                                 %d records / %d bytes) — flush or retry"
+                                (List.length s.unacked) s.unacked_bytes
+                                s.options.Options.max_inflight_requests
+                                s.inflight_limit_bytes)))
+                  | Options.Block ->
+                      if s.unacked = [] then (
+                        (* oversized-but-empty: admit to avoid deadlock *)
+                        let off = reserve_slot s framed in
+                        return (`Send (off, framed)))
+                      else begin
+                        let box = Mailbox.create ~capacity:1 in
+                        s.space_waiters <- box :: s.space_waiters;
+                        return (`Wait box)
+                      end
+                else
+                  let off = reserve_slot s framed in
+                  return (`Send (off, framed)))
+    in
+    match decision with
+    | `Err e -> return (Error e)
+    | `Wait box ->
+        let* _ = Mailbox.take box in
+        ingest_encoded s make (* retry after room frees (or the stream failed) *)
+    | `Send (off, framed) ->
+        (* send under send_lock so a concurrent recovery call-swap doesn't race the
+           write; [s.call] is read inside the lock. *)
+        let* send_r =
+          Mutex.with_lock s.send_lock (fun () -> Io.H2_client.send s.call framed)
+        in
+        (match send_r with
+         | Ok () -> return (Ok (Options.offset_of_int64 off))
+         | Error e -> return (Error e))
 
   let ingest (s : stream) (record : bytes) : (offset, Error.t) result Io.t =
     ingest_encoded s (fun off ->

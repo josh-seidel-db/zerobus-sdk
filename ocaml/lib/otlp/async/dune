@@ -1,0 +1,28 @@
+; zerobus-otlp-async (§4.3): the Async instantiation of the OTLP exporter. The
+; Async counterpart of zerobus-otlp (Lwt): unary LogsService / MetricsService
+; Export over the Async H2 client (reuses zerobus-async's transport), with the
+; same scoped OAuth grant over cohttp-async. Reuses the shared zerobus-otlp.proto
+; wire types.
+;
+; (optional): the whole library needs cohttp-async (which downgrades cohttp
+; 6.0->5.3 — benign, see doc/arch/tls_async_status.md), so it builds ONLY on a
+; switch where cohttp-async is installed and vanishes otherwise (mirrors the
+; built-in Async OAuth select). Not in standard CI.
+(library
+ (name zerobus_otlp_async)
+ (public_name zerobus-otlp-async)
+ (optional)
+ (modules zerobus_otlp_async)
+ (preprocess
+  (pps ppx_let))
+ (libraries
+  zerobus-core
+  zerobus-otlp.proto
+  zerobus-async
+  pbrt
+  core
+  async
+  cohttp-async
+  yojson
+  uri
+  base64))

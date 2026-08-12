@@ -1,0 +1,20 @@
+; Env-gated live integration suite (DESIGN §12.4), Lwt runtime. Exercises the
+; real TLS+ALPN+OAuth stack against a live workspace across all interfaces (gRPC
+; JSON/Proto streaming, REST insert, OTLP logs export). When the DATABRICKS_HOST /
+; DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET / ZEROBUS_TEST_TABLE env vars are
+; unset, every case is a clean no-op success, so it is safe to build/run anywhere.
+; It links the Lwt gRPC/REST/OTLP packages; it is NOT in the normal CI test loop
+; (a live run needs real credentials + a pre-created UC table).
+(test
+ (name test_integration_lwt)
+ (libraries
+  zerobus
+  zerobus-core
+  zerobus-core.proto
+  zerobus-rest
+  zerobus-otlp
+  zerobus-otlp.proto
+  pbrt
+  lwt
+  lwt.unix
+  alcotest))

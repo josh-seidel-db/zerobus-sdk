@@ -43,6 +43,11 @@ end
 let both (a : unit -> 'a t) (b : unit -> 'b t) : ('a * 'b) t =
   Lwt.both (a ()) (b ())
 
+(* First-wins race: Lwt.pick returns the first promise to resolve and CANCELS the
+   others — exactly the abandon-the-loser semantics {!Io.IO.first} wants. *)
+let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t =
+  Lwt.pick [ a (); b () ]
+
 let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
   Scope.register scope (Lwt.catch f (fun _ -> Lwt.return_unit))
 
@@ -353,6 +358,7 @@ module Io_impl = struct
   let map = map
   module Scope = Scope
   let both = both
+  let first = first
   let fork_daemon = fork_daemon
   module Mutex = Mutex
   module Mailbox = Mailbox
