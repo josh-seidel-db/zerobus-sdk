@@ -81,10 +81,13 @@ with the results-over-exceptions rule.
   writer" means a single fiber. Do not share a `stream` across fibers without your
   own synchronization.
 - **Async (`zerobus-async`)** — the façade is bracket-shaped (`with_stream` /
-  `with_stream_oauth`). Built-in client-credentials OAuth and live TLS are both
-  available as dune `select`s on optional deps (`cohttp-async`, `tls-async`); where
-  a dep is absent, pass a bearer via `with_stream`'s `headers_provider` (Lwt/Eio
-  are the always-on TLS references). "Single writer" means a single Async job.
+  `with_stream_oauth`). Live TLS and built-in client-credentials OAuth both build on
+  a single optional dep, `tls-async` (pure ocaml-tls): the transport drives the h2
+  core over a `Tls_async.connect` duplex, and the OAuth token POST is a hand-rolled
+  HTTP/1.1 request over the same (`Zerobus_async.Oauth.https_post`) — no
+  `cohttp-async`/OpenSSL. Where `tls-async` is absent, pass a bearer via
+  `with_stream`'s `headers_provider` and use cleartext (Lwt/Eio are the always-on
+  TLS references). "Single writer" means a single Async job.
 
 ## The bidirectional core
 

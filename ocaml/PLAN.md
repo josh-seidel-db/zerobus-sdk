@@ -4,12 +4,26 @@ Companion to `DESIGN.md`. This is the build plan: what to implement, in what
 order, with what acceptance criteria, given what the spikes have already proven.
 Section refs (§) point into `DESIGN.md`.
 
-> ⚠️ **Historical build plan — the SDK is now feature-complete.** The per-phase
-> statuses below (🟡 "designed, not built", ⬜ "not started", "deferred",
+> ⚠️ **Historical build plan — the SDK is feature-complete and live-verified.** The
+> per-phase statuses below (🟡 "designed, not built", ⬜ "not started", "deferred",
 > "pending") reflect the mid-build snapshot and are **stale**: all phases are done.
-> Every runtime (Lwt/Eio/Async) has a working transport + live TLS + built-in
-> OAuth + recovery; Proto/JSON/Arrow all run; REST and OTLP are built and tested.
-> For the current, accurate status see [`README.md`](README.md),
+> Current reality (2026-08-12):
+> - All three runtimes (Lwt / Eio / Async) have a working transport, live TLS, and
+>   built-in client-credentials OAuth — all pure ocaml-tls (Async OAuth is a
+>   hand-rolled HTTP/1.1 over `Tls_async.connect`, **not** cohttp-async/OpenSSL).
+> - All three record types (JSON / Proto / Arrow) run on all three runtimes, with
+>   offline Arrow mock tests for each (`test_driver_arrow`, `test_driver_async_arrow`,
+>   `test_driver_eio_arrow`).
+> - All four interfaces — gRPC streaming, REST, OTLP — are built on all three
+>   runtimes (`zerobus[-eio|-async]`, `zerobus-rest[-eio|-async]`,
+>   `zerobus-otlp[-eio|-async]`), 11 packages total.
+> - OTLP wire-compatibility is proven against the independent, canonical
+>   `opentelemetry` opam package's protos (`test_otlp_otel[_eio|_async]`).
+> - Every runtime × interface (gRPC JSON/Proto/Arrow, REST, OTLP) has been verified
+>   **live** against a real Databricks workspace (`test_integration/`, env-gated).
+>
+> Only release/publish (opam + `ocaml/v*` tags) remains, deferred until Databricks
+> Labs acceptance. For current status see [`README.md`](README.md),
 > [`doc/concurrency.md`](doc/concurrency.md), and
 > [`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md). This file is kept
 > as the build-order record; do not read its ✅/🟡/⬜ marks as current state.

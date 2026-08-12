@@ -36,6 +36,10 @@ jobs:
             ./zerobus-async.opam ./zerobus-rest.opam ./zerobus-otlp.opam \
             ./zerobus-arrow.opam
           opam install -y ocaml-protoc
+          # The canonical OpenTelemetry protos, for the cross-implementation OTLP
+          # wire-compat test (test_otlp_otel: our exporter encodes, this package's
+          # protos decode).
+          opam install -y opentelemetry opentelemetry-client-cohttp-lwt
       - name: Build (4.14 stack)
         run: |
           opam exec -- dune build \
@@ -45,12 +49,16 @@ jobs:
           opam exec -- dune build \
             examples/json_loop_then_flush_lwt.exe examples/ack_callback_lwt.exe \
             examples/rest_insert_lwt.exe examples/otlp_export_lwt.exe
+      # Build-check the env-gated live integration suite (it is a clean no-op
+      # success without DATABRICKS_* creds, so it is safe to compile in CI).
+      - name: Build live integration suite (Lwt)
+        run: opam exec -- dune build test_integration/test_integration_lwt.exe
       # Run the test directories one at a time: each spins up its own
       # separate-process mock server, so a sequential run avoids cross-test
       # contention and keeps failures easy to attribute.
       - name: Test (4.14 stack)
         run: |
-          for d in test test_driver test_driver_async test_driver_arrow test_driver_async_arrow test_rest test_otlp; do
+          for d in test test_driver test_driver_async test_driver_arrow test_driver_async_arrow test_rest test_otlp test_otlp_otel; do
             echo "== dune test $d =="
             opam exec -- dune test "$d/"
           done
@@ -71,6 +79,10 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # libarrow-dev provides arrow.pc for the optional zerobus-arrow codec + the
+      # Eio Arrow test (test_driver_eio_arrow).
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libarrow-dev pkg-config
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.2"
@@ -78,17 +90,23 @@ jobs:
       - name: Install OCaml dependencies
         run: |
           opam install -y --deps-only ./zerobus-core.opam ./zerobus-eio.opam \
-            ./zerobus-rest-eio.opam ./zerobus-otlp-eio.opam
+            ./zerobus-rest-eio.opam ./zerobus-otlp-eio.opam ./zerobus-arrow.opam
           opam install -y ocaml-protoc
+          # The canonical OpenTelemetry protos, for the cross-implementation OTLP
+          # wire-compat test (test_otlp_otel_eio).
+          opam install -y opentelemetry opentelemetry-client-cohttp-eio
       - name: Build (Eio)
         run: |
           opam exec -- dune build \
-            lib/core/ lib/eio/ lib/rest/eio/ lib/otlp/proto/ lib/otlp/eio/
+            lib/core/ lib/eio/ lib/rest/eio/ lib/otlp/proto/ lib/otlp/eio/ lib/arrow/
       - name: Build example (Eio)
         run: opam exec -- dune build examples/json_loop_then_flush_eio.exe
+      # Build-check the env-gated live integration suite (clean no-op without creds).
+      - name: Build live integration suite (Eio)
+        run: opam exec -- dune build test_integration/test_integration_eio.exe
       - name: Test (Eio)
         run: |
-          for d in test_driver_eio test_rest_eio test_otlp_eio; do
+          for d in test_driver_eio test_driver_eio_arrow test_rest_eio test_otlp_eio test_otlp_otel_eio; do
             echo "== dune test $d =="
             opam exec -- dune test "$d/"
           done

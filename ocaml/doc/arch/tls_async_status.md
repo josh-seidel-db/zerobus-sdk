@@ -61,20 +61,35 @@ change to the shipped lib to make this buildable: the Async transport now uses
 `Time_float` (v0.16-only), making it async-version-portable — verified not to
 regress the 6 Async mock tests on fl414 (v0.16).
 
-**Built-in OAuth on Async (2026-08-11, added):** the façade now has `mint_token`
-+ `with_stream_oauth` (client-credentials grant, token cache, mirrors the Lwt
-reference). Like live TLS, the HTTP backend is a dune `select` — on `cohttp-async`
-+ yojson/uri/base64: present → `lib/async/oauth.real.ml` does the real token POST;
-absent → `oauth.dummy.ml` returns an honest error and the caller supplies a bearer
-via `with_stream`'s `headers_provider`. `Zerobus_async.oauth_available : bool`
-reports which. Kept optional (maintainer decision) so the canonical fl414 switch is
-unchanged — installing cohttp-async forces `cohttp 6.0 → 5.3` (proven benign: Lwt
-3/3, REST 8/8, async 3/3 on 5.3), and gRPC-only users shouldn't pay that. Test:
-`test_driver_async_oauth/test_oauth_async.ml` 6/6 (mock token endpoint; incl. cache
-+ error-path). Evidence: `test_driver_async_oauth/EVIDENCE_OAUTH_ASYNC.txt`.
+**Built-in OAuth on Async — pure ocaml-tls (2026-08-12, updated):** the façade has
+`mint_token` + `with_stream_oauth` (client-credentials grant, token cache, mirrors
+the Lwt reference). The HTTP backend is a dune `select` on **`tls-async`** (+
+`ca-certs`, `domain-name`, `tls`, `yojson`, `base64`) — the SAME pure-OCaml TLS the
+gRPC transport uses, NOT `cohttp-async`. `lib/async/oauth.real.ml` speaks a
+hand-rolled HTTP/1.1 request over `Tls_async.connect` (`Zerobus_async.Oauth.https_post`);
+absent tls-async, `oauth.dummy.ml` returns an honest error and the caller supplies a
+bearer via `with_stream`'s `headers_provider`. `Zerobus_async.oauth_available : bool`
+reports which.
+
+Why not `cohttp-async`: its HTTPS goes through `conduit-async`, whose only TLS
+backend is `async_ssl` (OpenSSL via `conf-libssl`) — the C dependency the SDK
+deliberately avoids (DESIGN §12.5). An earlier iteration used `cohttp-async` and
+failed live with "Ssl not available"; the tls-async rewrite is what made the Async
+OAuth/REST/OTLP paths work live. So built-in OAuth now lights up wherever live TLS
+does — one dep (`tls-async`), no `cohttp-async` anywhere in the shipped libs. Tests:
+`test_driver_async_oauth/test_oauth_async.ml` (mock token endpoint) + the live
+`test_integration/test_integration_async.ml` (real workspace).
+
+**REST + OTLP on Async (2026-08-12, added):** `zerobus-rest-async` and
+`zerobus-otlp-async` are shipped (no longer Lwt-only). Both reuse
+`Zerobus_async.Oauth.https_post` for the token mint AND the REST insert POST — pure
+ocaml-tls, no `cohttp-async`. OTLP-async runs the unary Export over the Async H2
+client. Live-verified across all three runtimes; cross-implementation OTLP
+wire-compat proven against the canonical `opentelemetry` opam package's protos
+(`test_otlp_otel_async/`).
 
 **Remaining (optional):** none tracked for Async parity — live TLS, in-tree TLS
-test, and built-in OAuth are all done. (REST/OTLP remain Lwt-only by design.)
+test, built-in OAuth, and the REST/OTLP interfaces are all done and live-verified.
 
 ---
 

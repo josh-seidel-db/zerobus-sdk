@@ -96,10 +96,11 @@ the low-frequency and OpenTelemetry cases.
 | REST | `Zerobus_rest` (Lwt), `Zerobus_rest_eio`, `Zerobus_rest_async` | `zerobus-rest`, `zerobus-rest-eio`, `zerobus-rest-async` | Infrequent / edge reporting, webhooks |
 | OTLP | `Zerobus_otlp` (Lwt), `Zerobus_otlp_eio`, `Zerobus_otlp_async` | `zerobus-otlp`, `zerobus-otlp-eio`, `zerobus-otlp-async` | Already emitting OpenTelemetry logs/metrics |
 
-Each interface is available on all three runtimes (Lwt is the reference). The Eio
-REST/OTLP packages need OCaml 5.x; the Async REST/OTLP packages are optional and
-build only where `cohttp-async` is installed (same posture as the Async built-in
-OAuth — see the runtime notes below).
+Each interface is available on all three runtimes (Lwt is the reference), and all
+three have been verified live against a real workspace. The Eio REST/OTLP packages
+need OCaml 5.x; the Async REST/OTLP packages reuse the same pure-ocaml-tls HTTP
+backend as the Async gRPC transport (`tls-async`, no `cohttp-async`/OpenSSL — see
+the runtime notes below), so they build wherever `zerobus-async` does.
 
 ### Record types
 
@@ -156,18 +157,35 @@ contract in [`doc/concurrency.md`](doc/concurrency.md).
 
 The repo uses two opam switches — 4.14 (Lwt / Async) and 5.x (Eio). From `ocaml/`:
 
-```sh
-# 4.14 switch (Lwt, Async, REST, OTLP, Arrow):
-dune build lib/core/ lib/lwt/ lib/async/ lib/arrow/ lib/rest/ lib/otlp/
-dune test  test_driver/ test_driver_async/ test_driver_arrow/ test_rest/ test_otlp/
-# Arrow tests (incl. test_driver_async_arrow) need: export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
-# Async live-TLS / built-in-OAuth tests need a switch with tls-async / cohttp-async
-# (optional deps) — see doc/arch/tls_async_status.md.
+Arrow-linked builds/tests need libarrow on the pkg-config path:
+`export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig` (macOS Homebrew).
 
-# 5.x switch (Eio):
-dune build lib/core/ lib/eio/
-dune test  test_driver_eio/
+```sh
+# 4.14 switch (Lwt + Async, plus REST / OTLP / Arrow):
+dune build lib/core/ lib/lwt/ lib/async/ lib/arrow/ lib/rest/ lib/otlp/proto/ lib/otlp/
+dune test  test/ test_driver/ test_driver_async/ test_driver_arrow/ \
+           test_driver_async_arrow/ test_rest/ test_otlp/ test_otlp_otel/
+# test_otlp_otel/ decodes with the canonical `opentelemetry` opam package's protos
+# (a cross-implementation OTLP wire-compat check) — install `opentelemetry`.
+
+# 5.x switch (Eio, OCaml >= 5.0):
+dune build lib/core/ lib/eio/ lib/rest/eio/ lib/otlp/proto/ lib/otlp/eio/
+dune test  test_driver_eio/ test_driver_eio_arrow/ test_rest_eio/ \
+           test_otlp_eio/ test_otlp_otel_eio/
 ```
+
+The Async built-in-TLS/OAuth and Async REST/OTLP/OTEL tests
+(`test_driver_async_tls/`, `test_driver_async_oauth/`, `test_rest_async/`,
+`test_otlp_async/`, `test_otlp_otel_async/`) need a switch with `tls-async` (and, for
+the mock-server side, `cohttp-async`) on top of the 4.14 stack — see
+[`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md). They are `(optional)`
+and vanish otherwise, so they are not in the standard CI matrix; the shipped Async
+libraries themselves build on the plain 4.14 switch.
+
+The env-gated live integration suite (`test_integration/`, per DESIGN §12.4) runs on
+all three runtimes against a real workspace when `DATABRICKS_HOST` /
+`DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` / `ZEROBUS_TEST_TABLE` are set,
+and is a clean no-op success otherwise.
 
 (`dune build` of the whole tree only succeeds on a switch that has *both* runtime
 stacks installed; build the per-runtime directories on the matching switch.)

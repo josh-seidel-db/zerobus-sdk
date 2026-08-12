@@ -5,8 +5,12 @@ document is preserved as the original design record — it was written before an
 code existed and describes what the SDK "would" look like. The SDK has since been
 built and exceeds this proposal: all three runtimes (Lwt/Eio/Async) have working
 transports with live TLS, built-in OAuth, recovery, Proto/JSON/Arrow encodings,
-and the REST + OTLP interfaces. Some spike-era details below (e.g. gluten-based
-TLS, "next steps", per-runtime "deferred" notes) reflect the design-time picture,
+and the REST + OTLP interfaces — all pure ocaml-tls (the Async OAuth token POST is
+a hand-rolled HTTP/1.1 over `Tls_async.connect`, not cohttp-async/OpenSSL). Every
+runtime × interface has been verified live against a real workspace, and OTLP
+wire-compatibility is proven against the canonical `opentelemetry` opam package's
+protos. Some spike-era details below (e.g. gluten-based TLS, "next steps",
+per-runtime "deferred" notes) reflect the design-time picture,
 NOT the shipped code — for current capabilities and status see [`README.md`](README.md),
 [`doc/concurrency.md`](doc/concurrency.md), and [`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md).
 The goals, architecture (runtime-agnostic core + thin runtime packages), and
