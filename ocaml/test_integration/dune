@@ -17,6 +17,7 @@
   zerobus-rest
   zerobus-otlp
   zerobus-otlp.proto
+  zerobus-arrow
   pbrt
   lwt
   lwt.unix
@@ -35,6 +36,7 @@
   zerobus-rest-eio
   zerobus-otlp-eio
   zerobus-otlp.proto
+  zerobus-arrow
   pbrt
   eio
   eio_main
@@ -57,6 +59,7 @@
   zerobus-rest-async
   zerobus-otlp-async
   zerobus-otlp.proto
+  zerobus-arrow
   pbrt
   core
   async

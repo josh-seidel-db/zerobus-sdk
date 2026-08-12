@@ -27,6 +27,7 @@ type cfg = {
   client_secret : string;
   table_json : string;
   table_proto : string;
+  table_arrow : string;
   table_rest : string;
   table_otlp : string;
 }
@@ -48,6 +49,8 @@ let cfg : cfg option =
           table_json = table;
           table_proto =
             Option.value (getenv_opt "ZEROBUS_TEST_TABLE_PROTO") ~default:table;
+          table_arrow =
+            Option.value (getenv_opt "ZEROBUS_TEST_TABLE_ARROW") ~default:table;
           table_rest =
             Option.value (getenv_opt "ZEROBUS_TEST_TABLE_REST") ~default:table;
           table_otlp =
@@ -84,6 +87,17 @@ let proto_row (i : int) : bytes =
 
 let json_row (i : int) : bytes =
   Bytes.of_string (Printf.sprintf {|{"id": %d, "name": "row-%d"}|} i i)
+
+(* --- Arrow helpers (real zerobus-arrow IPC codec; {id:int64; name:string}) --- *)
+let arrow_schema () : bytes =
+  match Zerobus_arrow.schema_message () with
+  | Ok s -> s
+  | Error e -> failwith ("arrow schema_message: " ^ e)
+
+let arrow_row (i : int) : bytes =
+  match Zerobus_arrow.encode [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ] with
+  | Ok ipc -> ipc
+  | Error e -> failwith ("arrow encode: " ^ e)
 
 (* --- gRPC streaming ingest (JSON or Proto) via the Eio OAuth façade --- *)
 let grpc_ingest ~env ~sw (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
@@ -189,6 +203,13 @@ let () =
                        ~record_type:Opt.Proto
                        ~descriptor:(Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
                        ~mk_row:proto_row)));
+          Alcotest.test_case "gRPC Arrow ingest + flush" `Slow (fun () ->
+              Alcotest.(check bool) "ok" true
+                (run_live "grpc-arrow" (fun ~env ~sw c ->
+                     grpc_ingest ~env ~sw c ~table_name:c.table_arrow
+                       ~record_type:Opt.Arrow
+                       ~descriptor:(Some (Opt.descriptor_of_bytes (arrow_schema ())))
+                       ~mk_row:arrow_row)));
           Alcotest.test_case "REST insert" `Slow (fun () ->
               Alcotest.(check bool) "ok" true
                 (run_live "rest" (fun ~env ~sw c -> rest_insert ~env ~sw c)));

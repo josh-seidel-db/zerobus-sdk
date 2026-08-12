@@ -1,0 +1,15 @@
+; Cross-implementation OTLP test (Lwt): our Zerobus_otlp exporter (vendored
+; Zerobus_otlp_proto) against a mock collector that DECODES with the canonical
+; upstream opentelemetry.proto types — proving genuine OTLP wire-compatibility, not
+; just symmetric-codec round-tripping. The collector is a separate executable
+; spawned by the test. Runs on fl414 (needs the opentelemetry package).
+(executable
+ (name otel_collector_lwt)
+ (modules otel_collector_lwt)
+ (libraries opentelemetry.proto grpc grpc-lwt h2-lwt-unix lwt lwt.unix pbrt))
+
+(test
+ (name test_otlp_otel_lwt)
+ (modules test_otlp_otel_lwt)
+ (libraries zerobus-otlp zerobus-otlp.proto zerobus-core cohttp-lwt-unix lwt
+   lwt.unix uri unix alcotest))

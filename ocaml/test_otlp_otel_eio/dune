@@ -1,0 +1,18 @@
+; Cross-implementation OTLP test (Eio): our Zerobus_otlp_eio exporter against a
+; mock collector that DECODES with the canonical upstream opentelemetry.proto types
+; — proving genuine OTLP wire-compatibility. Separate-process grpc-eio collector.
+; Runs on zbeio (OCaml 5.x, needs the opentelemetry package).
+(executable
+ (name otel_collector_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules otel_collector_eio)
+ (libraries opentelemetry.proto grpc grpc-eio h2-eio eio eio_main eio.unix pbrt))
+
+(test
+ (name test_otlp_otel_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules test_otlp_otel_eio)
+ (libraries zerobus-otlp-eio zerobus-otlp.proto zerobus-core cohttp-eio eio
+   eio_main eio.unix http uri unix alcotest))
