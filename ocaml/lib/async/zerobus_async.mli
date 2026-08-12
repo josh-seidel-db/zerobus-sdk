@@ -144,3 +144,37 @@ module Tls_connect : sig
       honest-error stub backend. *)
   val pinned_cert_fp_sha256_b64 : string option ref
 end
+
+(** The built-in OAuth HTTP backend (a dune [select] on tls-async). Exposed so the
+    sibling REST/OTLP Async packages reuse the same pure-ocaml-tls client-
+    credentials token POST (hand-rolled HTTP/1.1 over [Tls_async.connect]) rather
+    than cohttp-async's OpenSSL conduit. Not part of the ergonomic surface. *)
+module Oauth : sig
+  (** [true] iff the real (tls-async) backend was selected at build time. *)
+  val available : bool
+
+  (** POST to [url] over pure-ocaml-tls (system trust store; https) or plain TCP
+      (http, for the cleartext test mock), with the given headers and body.
+      [Connection: close] + [Content-Length] are added automatically. Returns
+      [(http_status, response_body)] or the request exception. The shared HTTP
+      layer for the sibling REST/OTLP Async packages. *)
+  val https_post :
+    url:string ->
+    headers:(string * string) list ->
+    body:string ->
+    (int * string, exn) result Deferred.t
+
+  (** POST the client-credentials grant to [token_url] ([body] is the URL-encoded
+      request body; [client_id]/[client_secret] go in the HTTP Basic header).
+      Returns [(http_status, response_body)] or the request exception. *)
+  val post_token :
+    token_url:string ->
+    client_id:string ->
+    client_secret:string ->
+    body:string ->
+    (int * string, exn) result Deferred.t
+
+  (** Parse the token endpoint's JSON reply into [(access_token, expiry_epoch_s)]
+      ([now] is the base for the absolute expiry); [None] if malformed. *)
+  val parse_token_response : now:float -> string -> (string * float) option
+end

@@ -122,10 +122,13 @@ packages. Pick the one matching your app's concurrency library:
 - **`zerobus-eio` (Eio)** — OCaml 5.x, direct style. Bracket-shaped façade
   (`with_stream` / `with_stream_oauth`).
 - **`zerobus-async` (Async)** — bracket-shaped façade (`with_stream` /
-  `with_stream_oauth`). Built-in client-credentials OAuth and live TLS are both
-  optional (dune `select`s on `cohttp-async` and `tls-async`): present → they work;
-  absent → supply a bearer via `with_stream`'s `headers_provider` and use cleartext
-  (Lwt/Eio are the always-on TLS references).
+  `with_stream_oauth`). Live TLS and built-in client-credentials OAuth both use
+  pure ocaml-tls via a single dune `select` on `tls-async` (the OAuth token POST is
+  a hand-rolled HTTP/1.1 request over `Tls_async.connect`, not `cohttp-async`/
+  OpenSSL): present → both work; absent → supply a bearer via `with_stream`'s
+  `headers_provider` and use cleartext (Lwt/Eio are the always-on TLS references).
+  The `zerobus-rest-async` / `zerobus-otlp-async` packages reuse this same
+  pure-TLS HTTP backend, so no interface pulls OpenSSL.
 
 See [`examples/json_loop_then_flush_eio.ml`](examples/json_loop_then_flush_eio.ml)
 for the Eio (direct-style) shape.

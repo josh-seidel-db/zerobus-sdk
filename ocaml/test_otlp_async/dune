@@ -2,11 +2,11 @@
 ; collector (cleartext h2c) + an in-process cohttp-async OIDC token endpoint. The
 ; Async counterpart of test_otlp/test_otlp_lwt.
 ;
-; (optional) so the dir VANISHES on switches WITHOUT cohttp-async (e.g. the
-; canonical fl414) instead of erroring — zerobus-otlp-async is itself optional on
-; cohttp-async. It lights up on a cohttp-async-equipped switch. NOT in CI's fl414
-; job (which targets specific dirs and never names this one), same pattern as
-; test_driver_async_oauth/.
+; (optional): needs BOTH cohttp-async (only for the in-process mock token endpoint
+; here) AND tls-async (so zerobus-async selects the real Oauth backend the lib
+; uses). The dir VANISHES on switches lacking either (e.g. the canonical fl414)
+; instead of erroring. It lights up on a combined tls-async + cohttp-async switch.
+; NOT in CI. The live path is validated directly by test_integration/.
 (executable
  (name otlp_collector_async)
  (modules otlp_collector_async)

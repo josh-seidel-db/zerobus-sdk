@@ -95,11 +95,12 @@
  ; Two dune [select]s on optional deps (see doc/arch/tls_async_status.md):
  ;  - live TLS: tls-async + ca-certs + domain-name + tls + x509 + ptime (the
  ;    cert-fp authenticator) build the real tls_connect backend; else a stub.
- ;  - built-in OAuth: cohttp-async + yojson + uri + base64 build the real oauth
- ;    backend (client-credentials token mint); else mint_token returns an error and
- ;    the caller passes a bearer via with_stream's headers_provider.
- (depopts tls-async ca-certs domain-name tls x509 ptime cohttp-async yojson uri
-  base64))
+ ;  - built-in OAuth: tls-async + ca-certs + domain-name + tls + yojson + base64
+ ;    build the real oauth backend (client-credentials token mint over a hand-rolled
+ ;    HTTP/1.1 request on Tls_async.connect — pure ocaml-tls, no cohttp/OpenSSL);
+ ;    else mint_token returns an error and the caller passes a bearer via
+ ;    with_stream's headers_provider.
+ (depopts tls-async ca-certs domain-name tls x509 ptime yojson base64))
 
 (package
  (name zerobus-rest)
@@ -152,18 +153,17 @@
  (description
   "The Async instantiation of the optional REST interface (DESIGN §4.2): the\n\
    counterpart of zerobus-rest (Lwt). A thin POST-per-batch JSON insert wrapper\n\
-   over cohttp-async, reusing zerobus-core's scoped OAuth grant. The library is\n\
-   optional (builds only where cohttp-async is installed). For high volume use\n\
-   the zerobus-async (gRPC streaming) package instead.")
+   reusing zerobus-core's scoped OAuth grant and the shared pure-ocaml-tls HTTP\n\
+   backend from zerobus-async (over Tls_async.connect — no cohttp-async/OpenSSL).\n\
+   For high volume use the zerobus-async (gRPC streaming) package instead.")
  (depends
   (ocaml (>= 4.14))
   (zerobus-core (= :version))
+  (zerobus-async (= :version))
   core
   async
   ppx_let
-  cohttp-async
   yojson
-  uri
   base64
   (alcotest :with-test)))
 
@@ -192,8 +192,8 @@
   "The Async instantiation of the optional OTLP interface (DESIGN §4.3): the\n\
    counterpart of zerobus-otlp (Lwt). An otlp/grpc LogsService / MetricsService\n\
    exporter over the Async H2 transport (reuses zerobus-async), sharing the\n\
-   vendored OpenTelemetry collector protos (zerobus-otlp.proto). The library is\n\
-   optional (builds only where cohttp-async is installed).")
+   vendored OpenTelemetry collector protos (zerobus-otlp.proto) and zerobus-async's\n\
+   pure-ocaml-tls token backend (no cohttp-async/OpenSSL).")
  (depends
   (ocaml (>= 4.14))
   (zerobus-core (= :version))
@@ -203,9 +203,7 @@
   core
   async
   ppx_let
-  cohttp-async
   yojson
-  uri
   base64
   (alcotest :with-test)))
 

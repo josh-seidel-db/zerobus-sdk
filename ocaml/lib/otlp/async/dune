@@ -4,14 +4,14 @@
 ; same scoped OAuth grant over cohttp-async. Reuses the shared zerobus-otlp.proto
 ; wire types.
 ;
-; (optional): the whole library needs cohttp-async (which downgrades cohttp
-; 6.0->5.3 — benign, see doc/arch/tls_async_status.md), so it builds ONLY on a
-; switch where cohttp-async is installed and vanishes otherwise (mirrors the
-; built-in Async OAuth select). Not in standard CI.
+; The token mint reuses the shared pure-ocaml-tls HTTP backend from zerobus-async
+; (Zerobus_async.Oauth over Tls_async.connect) — NOT cohttp-async. Builds wherever
+; zerobus-async does; if tls-async is absent at build time the shared backend is
+; the honest-error stub, so export returns a Transport_error rather than doing I/O.
+; Not in standard CI (a live run needs credentials).
 (library
  (name zerobus_otlp_async)
  (public_name zerobus-otlp-async)
- (optional)
  (modules zerobus_otlp_async)
  (preprocess
   (pps ppx_let))
@@ -22,7 +22,5 @@
   pbrt
   core
   async
-  cohttp-async
   yojson
-  uri
   base64))

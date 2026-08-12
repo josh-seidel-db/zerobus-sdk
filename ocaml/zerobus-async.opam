@@ -25,16 +25,7 @@ depends: [
   "odoc" {with-doc}
 ]
 depopts: [
-  "tls-async"
-  "ca-certs"
-  "domain-name"
-  "tls"
-  "x509"
-  "ptime"
-  "cohttp-async"
-  "yojson"
-  "uri"
-  "base64"
+  "tls-async" "ca-certs" "domain-name" "tls" "x509" "ptime" "yojson" "base64"
 ]
 build: [
   ["dune" "subst"] {dev}

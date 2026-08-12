@@ -296,3 +296,10 @@ module Driver = Io_async.Stream
     [Tls_connect.pinned_cert_fp_sha256_b64] (the Async analogue of the Eio [~authenticator]
     override). Not part of the ergonomic surface. *)
 module Tls_connect = Tls_connect
+
+(** The built-in OAuth HTTP backend (a dune [select] on tls-async — the real
+    pure-ocaml-tls token POST, or an honest-error stub). Exposed so the sibling
+    REST/OTLP Async packages ([zerobus-rest-async], [zerobus-otlp-async]) can reuse
+    the {b same} pure-TLS token mint instead of pulling cohttp-async's OpenSSL
+    conduit. Not part of the ergonomic surface. *)
+module Oauth = Oauth

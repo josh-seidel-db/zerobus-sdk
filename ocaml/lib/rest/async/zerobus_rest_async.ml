@@ -82,31 +82,10 @@ let create ?(application_name : string option) ~endpoint ~workspace_url
               token_cache_lock = Sequencer.create ();
             })
 
-(* Parse the token endpoint's JSON reply: pull [access_token] + [expires_in]
-   (default 3600s). *)
-let parse_token_response ~now (body : string) : (string * float) option =
-  try
-    let json = Yojson.Safe.from_string body in
-    let field k =
-      match json with
-      | `Assoc l -> List.Assoc.find l k ~equal:String.equal
-      | _ -> None
-    in
-    match field "access_token" with
-    | Some (`String t) ->
-        let expires_in =
-          match field "expires_in" with
-          | Some (`Int n) -> Float.of_int n
-          | Some (`Float f) -> f
-          | Some (`String s) -> ( try Float.of_string s with _ -> 3600.0)
-          | _ -> 3600.0
-        in
-        Some (t, now +. expires_in)
-    | _ -> None
-  with _ -> None
-
 (* Mint (or reuse a cached) table-scoped token — same client-credentials grant as
-   the Lwt reference, 30s early-refresh, keyed by table. *)
+   the Lwt reference, 30s early-refresh, keyed by table. The HTTP POST is the
+   shared pure-ocaml-tls backend from zerobus-async ({!Zerobus_async.Oauth}, over
+   [Tls_async.connect]) — NOT cohttp-async (whose conduit needs OpenSSL). *)
 let mint_token t ~table : (string, error) result Deferred.t =
   Throttle.enqueue t.token_cache_lock (fun () ->
       let now = Unix.gettimeofday () in
@@ -120,28 +99,9 @@ let mint_token t ~table : (string, error) result Deferred.t =
           | Error e -> return (Error e)
           | Ok body -> (
               let token_url = t.workspace_url ^ "/oidc/v1/token" in
-              let basic =
-                Base64.encode_string (t.client_id ^ ":" ^ t.client_secret)
-              in
-              let headers =
-                Cohttp.Header.of_list
-                  [
-                    ("Content-Type", "application/x-www-form-urlencoded");
-                    ("Authorization", "Basic " ^ basic);
-                  ]
-              in
               match%map
-                Monitor.try_with ~run:`Now (fun () ->
-                    let%bind resp, resp_body =
-                      Cohttp_async.Client.post ~headers
-                        ~body:(Cohttp_async.Body.of_string body)
-                        (Uri.of_string token_url)
-                    in
-                    let%map body_str = Cohttp_async.Body.to_string resp_body in
-                    let code =
-                      Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-                    in
-                    (code, body_str))
+                Zerobus_async.Oauth.post_token ~token_url
+                  ~client_id:t.client_id ~client_secret:t.client_secret ~body
               with
               | Error exn ->
                   Error
@@ -154,7 +114,7 @@ let mint_token t ~table : (string, error) result Deferred.t =
                       (Error.Auth_error
                          (Printf.sprintf "token endpoint HTTP %d" code))
                   else (
-                    match parse_token_response ~now body_str with
+                    match Zerobus_async.Oauth.parse_token_response ~now body_str with
                     | Some (tok, expiry) ->
                         t.token_cache <-
                           (table, (tok, expiry))
@@ -176,25 +136,15 @@ let insert t ~table (records : Yojson.Safe.t list) : (unit, error) result Deferr
             Printf.sprintf "%s/zerobus/v1/tables/%s/insert" t.base_url table
           in
           let headers =
-            Cohttp.Header.of_list
-              [
-                ("Authorization", "Bearer " ^ token);
-                ("Content-Type", "application/json");
-              ]
+            [
+              ("Authorization", "Bearer " ^ token);
+              ("Content-Type", "application/json");
+            ]
           in
           let body = Yojson.Safe.to_string (`List records) in
-          match%map
-            Monitor.try_with ~run:`Now (fun () ->
-                let%bind resp, resp_body =
-                  Cohttp_async.Client.post ~headers
-                    ~body:(Cohttp_async.Body.of_string body) (Uri.of_string url)
-                in
-                let%map body_str = Cohttp_async.Body.to_string resp_body in
-                let code =
-                  Cohttp.Response.status resp |> Cohttp.Code.code_of_status
-                in
-                (code, body_str))
-          with
+          (* Pure-ocaml-tls HTTP POST (shared zerobus-async backend), NOT
+             cohttp-async — same OpenSSL-free posture as the token mint. *)
+          match%map Zerobus_async.Oauth.https_post ~url ~headers ~body with
           | Error exn ->
               Error
                 (Error.Transport_error

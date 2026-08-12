@@ -6,8 +6,8 @@ description: """
 The Async instantiation of the optional OTLP interface (DESIGN §4.3): the
 counterpart of zerobus-otlp (Lwt). An otlp/grpc LogsService / MetricsService
 exporter over the Async H2 transport (reuses zerobus-async), sharing the
-vendored OpenTelemetry collector protos (zerobus-otlp.proto). The library is
-optional (builds only where cohttp-async is installed)."""
+vendored OpenTelemetry collector protos (zerobus-otlp.proto) and zerobus-async's
+pure-ocaml-tls token backend (no cohttp-async/OpenSSL)."""
 maintainer: ["Databricks"]
 authors: ["Databricks"]
 license: "Apache-2.0"
@@ -23,9 +23,7 @@ depends: [
   "core"
   "async"
   "ppx_let"
-  "cohttp-async"
   "yojson"
-  "uri"
   "base64"
   "alcotest" {with-test}
   "odoc" {with-doc}

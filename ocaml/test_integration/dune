@@ -1,12 +1,15 @@
-; Env-gated live integration suite (DESIGN §12.4), Lwt runtime. Exercises the
-; real TLS+ALPN+OAuth stack against a live workspace across all interfaces (gRPC
-; JSON/Proto streaming, REST insert, OTLP logs export). When the DATABRICKS_HOST /
-; DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET / ZEROBUS_TEST_TABLE env vars are
-; unset, every case is a clean no-op success, so it is safe to build/run anywhere.
-; It links the Lwt gRPC/REST/OTLP packages; it is NOT in the normal CI test loop
-; (a live run needs real credentials + a pre-created UC table).
+; Env-gated live integration suite (DESIGN §12.4). Exercises the real
+; TLS+ALPN+OAuth stack against a live workspace across all interfaces (gRPC
+; JSON/Proto streaming, REST insert, OTLP logs export), per runtime. When the
+; DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET /
+; ZEROBUS_TEST_TABLE env vars are unset, every case is a clean no-op success, so
+; it is safe to build/run anywhere. NOT in the normal CI test loop (a live run
+; needs real credentials + a pre-created UC table).
+;
+; Lwt (reference) — always builds.
 (test
  (name test_integration_lwt)
+ (modules test_integration_lwt)
  (libraries
   zerobus
   zerobus-core
@@ -18,3 +21,49 @@
   lwt
   lwt.unix
   alcotest))
+
+; Eio — OCaml >= 5.0 only.
+(test
+ (name test_integration_eio)
+ (modules test_integration_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries
+  zerobus-eio
+  zerobus-core
+  zerobus-core.proto
+  zerobus-rest-eio
+  zerobus-otlp-eio
+  zerobus-otlp.proto
+  pbrt
+  eio
+  eio_main
+  alcotest))
+
+; Async — (optional): needs cohttp-async (OAuth) + tls-async (live TLS) via the
+; zerobus-rest-async / zerobus-otlp-async optional libs, so the executable VANISHES
+; on switches lacking them (e.g. the canonical fl414) instead of erroring, same
+; pattern as test_driver_async_oauth. Lights up on a combined async-live switch.
+(executable
+ (name test_integration_async)
+ (modules test_integration_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries
+  zerobus-async
+  zerobus-core
+  zerobus-core.proto
+  zerobus-rest-async
+  zerobus-otlp-async
+  zerobus-otlp.proto
+  pbrt
+  core
+  async
+  alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_integration_async.exe)
+ (action
+  (run ./test_integration_async.exe)))
