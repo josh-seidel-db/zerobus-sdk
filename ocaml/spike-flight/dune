@@ -1,0 +1,33 @@
+; Arrow Flight DoPut spike — proves the "native, free half" of Arrow support
+; (DESIGN.md §8.5): the REAL Flight protobuf messages (FlightData/PutResult) over
+; a client-initiated bidi gRPC stream, with Arrow IPC bytes as an OPAQUE data_body
+; (NO Arrow library) and the Zerobus offset in app_metadata.
+;
+; Same proven topology as spike-eio / spike-async: server in a separate process.
+; Runs on the Lwt switch (grpc-lwt/h2), where in-process bidi is already green.
+(rule
+ (targets flight.ml flight.mli)
+ (deps proto/flight.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . %{deps})))
+
+(library
+ (name flight_proto)
+ (modules flight)
+ (libraries pbrt))
+
+; Standalone mock Zerobus Flight/DoPut server. Port = argv.(1) (0 => OS-assigned,
+; announced as "READY <port>").
+(executable
+ (name flight_server)
+ (modules flight_server)
+ (libraries flight_proto grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+; Test driver: spawns the server, runs the DoPut client (stream FlightData +
+; drain PutResult acks concurrently), asserts all-acked / interleaved / monotonic
+; / data_body round-trips intact.
+(test
+ (name flight_doput_spike)
+ (modules flight_doput_spike)
+ (deps flight_server.exe)
+ (libraries flight_proto grpc grpc-lwt h2-lwt-unix lwt lwt.unix unix alcotest))

@@ -1,0 +1,26 @@
+; zerobus-rest-eio (§4.2): the Eio (direct-style) instantiation of the stateless
+; REST insert helper. The Eio counterpart of zerobus-rest (Lwt); reuses
+; zerobus-core's OAuth body-builder over cohttp-eio + tls-eio (system trust
+; store). Requires OCaml >= 5.0 (Eio needs effects), so the whole library is
+; disabled on 4.14 to keep an Lwt/Async `dune build` from resolving eio.
+(library
+ (name zerobus_rest_eio)
+ (public_name zerobus-rest-eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries
+  zerobus-core
+  cohttp-eio
+  eio
+  eio_main
+  eio.unix
+  tls
+  tls-eio
+  mirage-crypto-rng.unix
+  x509
+  ca-certs
+  domain-name
+  http
+  yojson
+  uri
+  base64))

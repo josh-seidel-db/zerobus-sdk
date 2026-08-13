@@ -1,0 +1,6 @@
+(lang dune 3.22)
+(name spike_recovery)
+(version 1.0)
+
+; Throwaway proof-of-concept spike — not part of the formatted, shipped tree.
+(formatting disabled)

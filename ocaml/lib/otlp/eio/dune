@@ -1,0 +1,29 @@
+; zerobus-otlp-eio (§4.3): the Eio (direct-style) instantiation of the OTLP
+; exporter. The Eio counterpart of zerobus-otlp (Lwt): unary LogsService /
+; MetricsService Export over the Eio H2 client (reuses zerobus-eio's transport),
+; with the same scoped OAuth grant over cohttp-eio. Reuses the shared
+; zerobus-otlp.proto wire types. Requires OCaml >= 5.0 (Eio needs effects).
+(library
+ (name zerobus_otlp_eio)
+ (public_name zerobus-otlp-eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules zerobus_otlp_eio)
+ (libraries
+  zerobus-core
+  zerobus-otlp.proto
+  zerobus-eio
+  pbrt
+  cohttp-eio
+  eio
+  eio_main
+  tls
+  tls-eio
+  mirage-crypto-rng.unix
+  x509
+  ca-certs
+  domain-name
+  http
+  yojson
+  uri
+  base64))

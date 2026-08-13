@@ -1,0 +1,64 @@
+; Arrow IPC -> Flight DoPut INTEGRATION spike. Combines the two proven halves:
+;   - real libarrow IPC codec (arrow_ipc.ml + arrow_ipc_stubs.cc), and
+;   - native Flight DoPut over bidi gRPC (Flight proto + grpc-lwt/h2).
+; Both client and server LINK real Apache Arrow (data_body is genuine Arrow IPC
+; the server decodes back to rows). Needs C++20 + Arrow's pkg-config flags and
+; PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig. Runs on the Lwt switch.
+
+; --- Flight proto codegen (same as spike-flight/) ---
+(rule
+ (targets flight.ml flight.mli)
+ (deps proto/flight.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . proto/flight.proto)))
+
+(library
+ (name flight_proto)
+ (modules flight)
+ (libraries pbrt))
+
+; --- Arrow C++ flags from pkg-config at build time ---
+; cflags: for compiling the C++ stub (needs C++20 for Arrow 25.x headers).
+(rule
+ (target arrow_cflags.sexp)
+ (action
+  (with-stdout-to
+   arrow_cflags.sexp
+   (run sh -c "printf '(-std=c++20 ' && pkg-config --cflags arrow && printf ')'"))))
+
+; c_library_flags takes RAW linker tokens (no -cclib prefix) — these are the libs
+; the stub's C library needs; dune threads them into the final exe link.
+(rule
+ (target arrow_libs.sexp)
+ (action
+  (with-stdout-to
+   arrow_libs.sexp
+   (run sh -c "printf '(' && pkg-config --libs arrow && printf ' -lstdc++ )'"))))
+
+; --- shared Arrow IPC codec library (real libarrow) linked by BOTH client+server,
+; so the C++ stub object is built exactly once. Unwrapped so the module is
+; [Arrow_ipc] (not [Arrow_ipc_lib.Arrow_ipc]). ---
+(library
+ (name arrow_ipc_lib)
+ (wrapped false)
+ (modules arrow_ipc)
+ (foreign_stubs
+  (language cxx)
+  (names arrow_ipc_stubs)
+  (flags
+   (:include arrow_cflags.sexp)))
+ (c_library_flags
+  (:include arrow_libs.sexp)))
+
+; --- server: Flight/DoPut + real Arrow IPC decode ---
+(executable
+ (name flight_arrow_server)
+ (modules flight_arrow_server)
+ (libraries arrow_ipc_lib flight_proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+; --- test client: real Arrow IPC encode -> FlightData.data_body -> DoPut ---
+(test
+ (name test_arrow_flight)
+ (modules test_arrow_flight)
+ (deps flight_arrow_server.exe)
+ (libraries arrow_ipc_lib flight_proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix unix alcotest))

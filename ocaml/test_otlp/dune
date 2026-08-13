@@ -1,0 +1,22 @@
+; Phase 7d test: Zerobus_otlp exporter against a mock OTLP collector (separate
+; process, cleartext h2c) + an in-process cohttp OIDC token endpoint.
+(executable
+ (name otlp_collector)
+ (modules otlp_collector)
+ (libraries zerobus-otlp.proto pbrt grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+(test
+ (name test_otlp_lwt)
+ (modules test_otlp_lwt)
+ (deps otlp_collector.exe)
+ (libraries
+  zerobus-otlp
+  zerobus-otlp.proto
+  zerobus-core
+  cohttp-lwt-unix
+  lwt
+  lwt.unix
+  uri
+  yojson
+  unix
+  alcotest))

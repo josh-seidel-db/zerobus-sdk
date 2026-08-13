@@ -1,0 +1,26 @@
+; Cross-implementation OTLP test (Async): our Zerobus_otlp_async exporter against a
+; mock collector that DECODES with the canonical upstream opentelemetry.proto types
+; — proving genuine OTLP wire-compatibility. The separate-process mock is the Lwt
+; canonical collector (test_otlp_otel/otel_collector_lwt.exe): its runtime is
+; irrelevant to what's under test (the Async client + our framing), and the
+; combined async-live switch has grpc-async 0.1.0 (no Grpc_async.Server) whereas
+; grpc-lwt 0.1.0 provides a server.
+;
+; (optional): needs cohttp-async + tls-async + opentelemetry, so the dir VANISHES
+; on switches lacking them (e.g. the canonical fl414). Runs in the NON-BLOCKING
+; bespoke-switch CI job (.github/workflows/ci-ocaml-async-bespoke.yml) — it is the
+; Async OTLP coverage there (test_otlp_async can't run on that switch; see its dune).
+(executable
+ (name test_otlp_otel_async)
+ (modules test_otlp_otel_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-otlp-async zerobus-otlp.proto zerobus-core core core_unix
+   core_unix.filename_unix async unix cohttp-async alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_otlp_otel_async.exe ../test_otlp_otel/otel_collector_lwt.exe)
+ (action
+  (run ./test_otlp_otel_async.exe)))

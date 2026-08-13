@@ -1,0 +1,35 @@
+ZEROBUS OCAML — ARROW IPC -> FLIGHT DoPut INTEGRATION (Phase 7b wiring)
+Combines the two proven halves into the real end-to-end seam:
+  spike-arrow-ipc-real/ (real libarrow IPC codec) + spike-flight/ (native DoPut).
+
+ocaml_version : 4.14.1
+rpc           : arrow.flight.protocol.FlightService/DoPut (bidi gRPC, Lwt)
+arrow_library : REAL libarrow (Arrow 25.0.1) linked in BOTH client and server
+path          : rows -> Arrow_ipc.encode (C++ RecordBatchStreamWriter)
+                     -> FlightData.data_body (opaque bytes on the wire)
+                     -> DoPut stream
+                     -> Arrow_ipc.decode (C++ RecordBatchStreamReader) -> rows
+
+RESULT: PASS (3/3, stable x3)
+- batches_sent            : 50 (5 rows each)  [also verified at 200]
+- acks_received           : 50
+- arrow_encode_error      : none
+- all_acks_match_decoded  : true
+  => the server INDEPENDENTLY Arrow-decoded every data_body back to the exact rows
+     the client Arrow-encoded (ack "<offset>:<nrows>:<idsum>" matched per batch).
+     This proves the data_body carries genuine Arrow IPC bytes end to end, not
+     opaque bytes echoed back.
+
+ISOLATION: the Arrow codec lives in its own library (arrow_ipc_lib, real libarrow
+behind it). Verified via otool -L that the core/Lwt driver (test_driver_lwt.exe)
+does NOT link libarrow — JSON/Proto paths never pull Arrow. Only Arrow-path
+binaries link it (optional depext), per DESIGN §8.5.2.
+
+NOTE: bidi send/ack interleaving is NOT re-asserted here (it is proven in
+spike-flight/ at 200 opaque batches). The synchronous C++ Arrow encode between
+sends serializes the sender fiber, so the batch is often fully sent before the
+first ack drains — a scheduling artifact, not a correctness issue.
+
+Build: needs PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig + C++20 + apache-arrow.
+Run: dune exec ./spike-arrow-flight-integration/test_arrow_flight.exe
+     (kill leftover flight_arrow_server first; use a watchdog).

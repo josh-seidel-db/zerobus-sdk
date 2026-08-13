@@ -1,0 +1,37 @@
+ZEROBUS OCAML — LIVE INTEGRATION SUITE (§12.4) — evidence
+==========================================================
+Date        : 2026-08-12
+Workspace   : adb-984752964297111.11.azuredatabricks.net (Azure eastus2)
+Endpoint    : 984752964297111.zerobus.eastus2.azuredatabricks.net:443 (explicit)
+Table       : main.default.zerobus_it_20260811234323  { id BIGINT, name STRING }
+Auth        : service-principal client-credentials grant (scoped token per table)
+Rows/iface  : 5 ; gRPC JSON + gRPC Proto + REST each write {id,name}; OTLP exports
+              OTel logs to the Zerobus OTLP endpoint (its own schema, not this table).
+
+All three runtimes: 4/4 cases PASS live, rows verified PERSISTED by SQL query.
+
+Lwt  (switch fl414)            : 4/4 — table SELECT count = 15 (3 ifaces x 5)
+Eio  (switch zbeio)            : 4/4 — table SELECT count = 15
+Async(switch fl414-async-live) : 4/4 — table SELECT count = 15
+
+Per interface (identical across runtimes):
+  gRPC JSON ingest + flush   : OK  (loop-then-flush, durable flush Ok)
+  gRPC Proto ingest + flush  : OK  (DescriptorProto {id:int64=1; name:string=2})
+  REST insert                : OK  (2xx; POST /zerobus/v1/tables/<t>/insert)
+  OTLP logs export           : OK  (LogsService/Export gRPC status OK)
+
+TLS: all paths use pure ocaml-tls (no OpenSSL).
+  - Lwt : tls-lwt (conduit-lwt-unix) for OAuth/REST HTTPS; tls-lwt for gRPC h2.
+  - Eio : tls-eio for OAuth/REST HTTPS + gRPC h2.
+  - Async: tls-async for gRPC h2 AND for OAuth/REST/OTLP token — via a hand-rolled
+           HTTP/1.1 client over Tls_async.connect (Zerobus_async.Oauth.https_post),
+           NOT cohttp-async (whose conduit-async only does TLS via async_ssl/OpenSSL,
+           the C dep the SDK avoids — DESIGN §12.5). This was the fix that took the
+           Async REST/OTLP live paths from FAIL ("Ssl not available") to PASS.
+
+Async switch (fl414-async-live, THROWAWAY): OCaml 4.14.1, h2 0.12, h2-async 0.12,
+  tls-async 0.17.0, cohttp-async 5.2.0 (present but UNUSED by the SDK after the
+  https_post refactor), async v0.15, grpc-async 0.1.0. Removed after the run.
+
+Unconfigured (no env): every case is a clean no-op success (4/4, configured:false,
+  exit 0) on all runtimes — safe for CI / offline dev.

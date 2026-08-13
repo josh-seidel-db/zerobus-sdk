@@ -1,0 +1,64 @@
+======================================================================
+ ZEROBUS OCAML SDK -- LIVE SPIKE (real workspace): CAPTURED EVIDENCE
+ Proves DESIGN.md next-step 3 / §12.1 (TLS+ALPN) and §12.2 (scoped OAuth)
+ natively, against a real Azure Databricks workspace. See README.md.
+======================================================================
+
+-- Toolchain of record ----------------------------------------------
+host_os : Darwin 25.5.0 arm64
+ocaml   : The OCaml toplevel, version 4.14.1
+dune    : 3.22.2
+opam    : base64 3.5.2
+opam    : ca-certs 0.2.3
+opam    : cohttp-lwt-unix 6.0.0
+opam    : conduit 6.2.3
+opam    : gluten-lwt-unix 0.5.1
+opam    : h2-lwt-unix 0.12.0
+opam    : mirage-crypto 0.11.3
+opam    : tls 0.17.5
+opam    : tls-lwt 0.17.5
+opam    : uri 4.4.0
+opam    : x509 0.16.5
+opam    : yojson 3.0.0
+
+-- §12.1 native TLS + ALPN h2 (no credential needed) ----------------
+== §12.1 TLS+ALPN spike ==
+endpoint: 984752964297111.zerobus.eastus2.azuredatabricks.net:443
+tcp: connected
+tls: handshake OK (cert chain verified vs ca-certs)
+
+-- EVIDENCE (§12.1) --
+timestamp_utc  : 2026-08-10T20:01:20Z
+endpoint       : 984752964297111.zerobus.eastus2.azuredatabricks.net:443
+tls_version    : TLS1.3
+cert_verified  : true (ca-certs system trust anchors)
+alpn_negotiated: h2
+RESULT: PASS — native OCaml negotiated ALPN h2 over TLS.
+
+-- §12.2 native scoped OAuth (service principal, table-scoped) ------
+== §12.2 scoped-OAuth spike ==
+host : https://adb-984752964297111.11.azuredatabricks.net
+table: main.default.zerobus_spike_20260810155110
+http: 200 from https://adb-984752964297111.11.azuredatabricks.net/oidc/v1/token
+
+-- EVIDENCE (§12.2) --
+timestamp_utc  : 2026-08-10T20:01:21Z
+token_endpoint : https://adb-984752964297111.11.azuredatabricks.net/oidc/v1/token
+scope          : all-apis
+resource       : api://databricks/workspaces/984752964297111/zerobusDirectWriteApi
+authorization_details: 3 UC entries (CATALOG/SCHEMA/TABLE) for main.default.zerobus_spike_20260810155110
+access_token   : received, length 3318 (value NOT logged)
+expires_in     : 3600 s
+RESULT: PASS — native OCaml obtained a table-scoped Zerobus token.
+
+-- Live resources used (created for this spike; teardown in README) -
+workspace   : adb-984752964297111.11.azuredatabricks.net (Azure eastus2)
+service_prin: zerobus-ocaml-spike-20260810155046  (appId d2cb41fd-5a97-46e0-ad09-038ba3240d55)
+table       : main.default.zerobus_spike_20260810155110
+
+CONCLUSION: The two unknowns the loopback spikes could not cover are proven
+NATIVELY against a real workspace: (1) OCaml tls-lwt negotiates TLS1.3+ALPN h2
+to the Zerobus gRPC endpoint with system-trust cert verification; (2) OCaml
+obtains a real table-scoped Zerobus OAuth token via authorization_details.
+The one required new dep (tls-lwt+ca-certs, §12.1) is confirmed sufficient;
+installing it rebuilt gluten's real Tls_io (dummy -> real). GO.

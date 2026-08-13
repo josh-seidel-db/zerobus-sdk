@@ -1,0 +1,158 @@
+name: OCaml CI
+
+on:
+  workflow_call:
+
+# The OCaml SDK (ocaml/) is a polyglot-runtime package set built from one
+# runtime-agnostic core. It targets two opam switches:
+#   - 4.14  -> Lwt + Async runtimes, plus the REST / OTLP / Arrow packages
+#   - 5.x   -> the Eio runtime (needs OCaml 5 effects)
+# so CI runs a job per switch. Release/publish is intentionally NOT here yet
+# (deferred until the SDK is accepted into Databricks Labs).
+
+jobs:
+  # ---- 4.14: core + Lwt + Async + REST + OTLP + Arrow ----
+  build-test-414:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocaml
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # libarrow-dev provides arrow.pc on the default pkg-config path (needed by
+      # the optional zerobus-arrow codec + its test).
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libarrow-dev pkg-config
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "4.14"
+          dune-cache: true
+      - name: Install OCaml dependencies
+        run: |
+          opam install -y --deps-only ./zerobus-core.opam ./zerobus.opam \
+            ./zerobus-async.opam ./zerobus-rest.opam ./zerobus-otlp.opam \
+            ./zerobus-arrow.opam
+          opam install -y ocaml-protoc
+          # ocamlformat pins the format style (.ocamlformat, profile=default);
+          # the @fmt gate below enforces it. Version-pinned so CI matches local.
+          opam install -y ocamlformat.0.29.0
+          # odoc: the @doc gate below compiles all doc comments (catches broken
+          # odoc markup); cross-package reference warnings are expected and benign.
+          opam install -y odoc
+          # The canonical OpenTelemetry protos, for the cross-implementation OTLP
+          # wire-compat test (test_otlp_otel: our exporter encodes, this package's
+          # protos decode).
+          opam install -y opentelemetry opentelemetry-client-cohttp-lwt
+      # Enforce OCaml source formatting (dune files are excluded via the
+      # dune-project (formatting (enabled_for ocaml)) stanza; throwaway spikes
+      # disable formatting in their own dune-project).
+      - name: Check formatting
+        run: opam exec -- dune build @fmt
+      # Build the API docs for the 4.14-buildable packages — compiles every doc
+      # comment, so malformed odoc markup fails the build. Scoped with
+      # --only-packages so it does not try to document the Eio-only packages
+      # (whose deps are absent here). odoc's cross-package reference warnings do
+      # not fail the build (they are unavoidable when documenting one package in
+      # isolation) — this gate is about doc-comment syntax, not link resolution.
+      - name: Build API docs (4.14 packages)
+        run: |
+          opam exec -- dune build @doc \
+            --only-packages=zerobus-core,zerobus,zerobus-async,zerobus-arrow,zerobus-rest,zerobus-otlp,zerobus-rest-async,zerobus-otlp-async
+      - name: Build (4.14 stack)
+        run: |
+          opam exec -- dune build \
+            lib/core/ lib/lwt/ lib/async/ lib/arrow/ lib/rest/ lib/otlp/proto/ lib/otlp/
+      - name: Build examples (Lwt + Async)
+        run: |
+          opam exec -- dune build \
+            examples/json_loop_then_flush_lwt.exe examples/ack_callback_lwt.exe \
+            examples/rest_insert_lwt.exe examples/otlp_export_lwt.exe \
+            examples/json_loop_then_flush_async.exe examples/ack_callback_async.exe \
+            examples/rest_insert_async.exe examples/otlp_export_async.exe
+      # Build-check the env-gated live integration suite (it is a clean no-op
+      # success without DATABRICKS_* creds, so it is safe to compile in CI).
+      - name: Build live integration suite (Lwt)
+        run: opam exec -- dune build test_integration/test_integration_lwt.exe
+      # Run the test directories one at a time: each spins up its own
+      # separate-process mock server, so a sequential run avoids cross-test
+      # contention and keeps failures easy to attribute.
+      - name: Test (4.14 stack)
+        run: |
+          for d in test test_driver test_driver_async test_driver_arrow test_driver_async_arrow test_rest test_otlp test_otlp_otel; do
+            echo "== dune test $d =="
+            opam exec -- dune test "$d/"
+          done
+      - name: opam lint
+        run: |
+          for f in zerobus-core zerobus zerobus-async zerobus-rest zerobus-otlp zerobus-arrow; do
+            opam lint "$f.opam"
+          done
+
+  # ---- 5.x: the Eio runtime ----
+  build-test-5x:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocaml
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # libarrow-dev provides arrow.pc for the optional zerobus-arrow codec + the
+      # Eio Arrow test (test_driver_eio_arrow).
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libarrow-dev pkg-config
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2"
+          dune-cache: true
+      - name: Install OCaml dependencies
+        run: |
+          opam install -y --deps-only ./zerobus-core.opam ./zerobus-eio.opam \
+            ./zerobus-rest-eio.opam ./zerobus-otlp-eio.opam ./zerobus-arrow.opam
+          opam install -y ocaml-protoc
+          opam install -y ocamlformat.0.29.0
+          opam install -y odoc
+          # The canonical OpenTelemetry protos, for the cross-implementation OTLP
+          # wire-compat test (test_otlp_otel_eio).
+          opam install -y opentelemetry opentelemetry-client-cohttp-eio
+      # Enforce OCaml source formatting (see the 4.14 job for details).
+      - name: Check formatting
+        run: opam exec -- dune build @fmt
+      # Build API docs for the self-contained Eio-switch packages (compiles doc
+      # comments; see the 4.14 job). zerobus-rest-eio / zerobus-otlp-eio are
+      # intentionally omitted: documenting them pulls in the Lwt zerobus-otlp
+      # package (its .proto sublib), whose cohttp-lwt-unix dep is absent on this
+      # switch. Their doc comments mirror the Lwt REST/OTLP packages, which the
+      # 4.14 job documents.
+      - name: Build API docs (Eio packages)
+        run: |
+          opam exec -- dune build @doc \
+            --only-packages=zerobus-core,zerobus-eio,zerobus-arrow
+      - name: Build (Eio)
+        run: |
+          opam exec -- dune build \
+            lib/core/ lib/eio/ lib/rest/eio/ lib/otlp/proto/ lib/otlp/eio/ lib/arrow/
+      - name: Build examples (Eio)
+        run: |
+          opam exec -- dune build \
+            examples/json_loop_then_flush_eio.exe examples/ack_callback_eio.exe \
+            examples/rest_insert_eio.exe examples/otlp_export_eio.exe
+      # Build-check the env-gated live integration suite (clean no-op without creds).
+      - name: Build live integration suite (Eio)
+        run: opam exec -- dune build test_integration/test_integration_eio.exe
+      - name: Test (Eio)
+        run: |
+          for d in test_driver_eio test_driver_eio_arrow test_rest_eio test_otlp_eio test_otlp_otel_eio; do
+            echo "== dune test $d =="
+            opam exec -- dune test "$d/"
+          done
+      - name: opam lint
+        run: |
+          for f in zerobus-core zerobus-eio zerobus-rest-eio zerobus-otlp-eio; do
+            opam lint "$f.opam"
+          done

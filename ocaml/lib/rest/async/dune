@@ -1,0 +1,23 @@
+; zerobus-rest-async (§4.2): the Async instantiation of the stateless REST
+; insert helper. The Async counterpart of zerobus-rest (Lwt); reuses
+; zerobus-core's OAuth body-builder and the SHARED pure-ocaml-tls HTTP backend
+; from zerobus-async (Zerobus_async.Oauth.https_post over Tls_async.connect) for
+; both the token mint and the insert POST — NOT cohttp-async (whose conduit needs
+; OpenSSL). So no OpenSSL dependency, matching the SDK's ocaml-tls posture.
+;
+; Builds everywhere zerobus-async does; if tls-async is absent at build time the
+; shared HTTP backend is the honest-error stub, so insert returns a Transport_error
+; rather than performing I/O (same posture as built-in Async OAuth). Not in
+; standard CI (a live run needs credentials).
+(library
+ (name zerobus_rest_async)
+ (public_name zerobus-rest-async)
+ (preprocess
+  (pps ppx_let))
+ (libraries
+  zerobus-core
+  zerobus-async
+  core
+  async
+  yojson
+  base64))

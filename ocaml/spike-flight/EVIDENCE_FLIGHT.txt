@@ -1,0 +1,50 @@
+======================================================================
+ ZEROBUS OCAML SDK -- ARROW FLIGHT / DoPut SPIKE: CAPTURED EVIDENCE
+ Proves the native/free half of Arrow support (DESIGN.md §8.5): the REAL
+ Flight FlightData/PutResult protobufs over a bidi gRPC stream, Arrow IPC
+ bytes carried as an OPAQUE data_body with NO Arrow library linked.
+ Regenerate: cd ocaml/spike-flight && dune runtest --force
+======================================================================
+
+-- Toolchain of record ----------------------------------------------
+host_os : Darwin 25.5.0 arm64
+ocaml   : The OCaml toplevel, version 4.14.1
+dune    : 3.22.2
+opam    : alcotest 1.9.1
+opam    : gluten 0.5.1
+opam    : grpc 0.2.0
+opam    : grpc-lwt 0.2.0
+opam    : h2 0.12.0
+opam    : h2-lwt-unix 0.12.0
+opam    : ocaml-protoc 4.1
+opam    : pbrt 4.1
+arrow libs linked : NONE (confirm: no arrow/parquet/libarrow dep above)
+
+-- Measured facts (fresh run; server in a separate process) ---------
+timestamp_utc          : 2026-08-10T22:21:40Z
+ocaml_version          : 4.14.1
+rpc                    : arrow.flight.protocol.FlightService/DoPut (bidi)
+proto                  : real Flight FlightData/PutResult (data_body=1000)
+arrow_library_linked   : NONE (data_body carried as opaque bytes)
+batches_sent           : 200
+acks_received          : 200
+sends_done_at_first_ack: 103 (of 200)  <- ack arrived mid-send
+first_offset           : 0
+last_offset            : 199
+offsets_contiguous     : true
+opaque_data_body       : INTACT (server verified len+checksum of every batch body)
+
+-- Test verdict (alcotest) ------------------------------------------
+  [OK]          flight DoPut (bidi)          0   every batch acked.
+  [OK]          flight DoPut (bidi)          1   acks interleave with sends.
+  [OK]          flight DoPut (bidi)          2   offsets monotonic.
+  [OK]          flight DoPut (bidi)          3   opaque data_body carried.
+Test Successful in 0.001s. 4 tests run.
+
+CONCLUSION: The Flight DoPut RPC half of Arrow support is NATIVE OCaml and
+needs NO Arrow library. Real arrow.flight.protocol FlightData/PutResult
+messages (incl. data_body=1000) round-trip over grpc-lwt/h2; the opaque IPC
+payload is carried byte-exact (server-verified) and the Zerobus offset rides
+in app_metadata, exactly as rust/sdk/src/stream/arrow does. The ONLY Arrow
+gap that remains is the IPC-bytes CODEC (optional scoped libarrow binding),
+never the RPC and never the C++ Zerobus SDK. See DESIGN.md 8.5.

@@ -1,0 +1,26 @@
+; Async Arrow test: the PUBLIC Zerobus_async façade auto-selects the Arrow Flight
+; DoPut driver when record_type=Arrow, with REAL Arrow IPC bodies from zerobus-arrow.
+; The Async counterpart of test_driver_arrow/ (Lwt) — proves Async has Arrow parity.
+;
+; Needs PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig + apache-arrow (libarrow, for the
+; zerobus-arrow codec on both client and mock). fl414.
+;
+; The mock server (flight_arrow_server) is the same one test_driver_arrow/ uses — it
+; is runtime-agnostic (grpc-lwt server, speaks Flight), so we build our own copy here
+; rather than reach into the sibling dir's private build.
+
+; --- Arrow/Flight mock server (decodes IPC via zerobus-arrow, acks offset) ---
+(executable
+ (name flight_arrow_server)
+ (modules flight_arrow_server)
+ (libraries zerobus-core.proto zerobus-arrow pbrt grpc grpc-lwt h2-lwt-unix lwt
+   lwt.unix))
+
+; --- Async façade test: Zerobus_async + record_type=Arrow + zerobus-arrow codec ---
+(test
+ (name test_arrow_async)
+ (modules test_arrow_async)
+ (deps flight_arrow_server.exe)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-async zerobus-core zerobus-arrow core async unix alcotest))

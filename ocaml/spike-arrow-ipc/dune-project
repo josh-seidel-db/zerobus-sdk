@@ -1,0 +1,6 @@
+(lang dune 3.7)
+(name arrow_ipc_spike)
+(version 0.1)
+
+; Throwaway proof-of-concept spike — not part of the formatted, shipped tree.
+(formatting disabled)

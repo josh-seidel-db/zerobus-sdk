@@ -1,0 +1,59 @@
+ZEROBUS OCaml SDK — LIVE AUTH-MATRIX INTEGRATION EVIDENCE
+=========================================================
+Date: 2026-08-13
+Workspace: adb-984752964297111.11.azuredatabricks.net (Azure eastus2)
+Zerobus gRPC endpoint: 984752964297111.zerobus.eastus2.azuredatabricks.net:443
+
+WHAT WAS PROVEN
+---------------
+For each of the 3 runtimes (Lwt / Eio / Async), the full env-gated
+test_integration suite ran LIVE against the real workspace — proving
+connect -> authenticate -> ingest -> durable-flush across every interface
+and BOTH authentication mechanisms:
+
+  Auth mechanism #1 — built-in scoped OAuth (SDK mints table-scoped token):
+    - gRPC streaming JSON  ingest + flush
+    - gRPC streaming Proto ingest + flush (DescriptorProto {id:int64; name:string})
+    - gRPC streaming Arrow ingest + flush (real zerobus-arrow IPC over Flight DoPut)
+    - REST insert           (Zerobus_rest[/_eio/_async].insert)
+    - OTLP logs export      (Zerobus_otlp[/_eio/_async].export_logs)
+
+  Auth mechanism #2 — caller-supplied bearer headers (BYO token):
+    - gRPC streaming JSON  ingest + flush (create_stream_with_headers / with_stream)
+    - gRPC streaming Proto ingest + flush
+    (bearer minted by the caller: Lwt via a direct cohttp POST to /oidc/v1/token;
+     Eio/Async via the public mint_token; supplied as authorization: Bearer + the
+     x-databricks-zerobus-table-name header)
+
+RESULTS
+-------
+  Lwt   (switch fl414)            : 7 tests run, Test Successful (~5.0s)
+  Eio   (switch zbeio)            : 7 tests run, Test Successful (~6.8s)
+  Async (switch fl414-async-live) : 7 tests run, Test Successful (~3.8s)
+
+  => 21 live cases, all PASS. configured:true on all three.
+
+DURABILITY VERIFIED BY SQL (ground truth, not just a flush ack)
+---------------------------------------------------------------
+Table main.default.zerobus_it_20260813104206 (id BIGINT, name STRING):
+  SELECT count(*), count(DISTINCT id), min(id), max(id)
+    -> 120 rows, 5 distinct ids, ids 0..4
+  GROUP BY name -> row-0..row-4 each appear 24 times.
+
+  Accounting: each suite writes 6 cases to this table
+  (JSON/Proto/Arrow OAuth + JSON/Proto headers + REST = 6 x 5 rows = 30);
+  OTLP logs go to a separate OTLP sink, not this table.
+  Runs: Lwt x2 (re-run for per-case labels) + Eio x1 + Async x1 = 4 runs.
+  4 x 30 = 120. Consistent.
+
+CLOUD RESOURCES (all torn down after — see teardown log)
+--------------------------------------------------------
+  SP: zerobus-ocaml-it-20260813104206
+      appId 550b28ce-62a9-4361-8f7b-e54feca081de, id 148213040413162
+  Secret: id 1d616e227a81fe... (deleted in teardown; SP shell left inert)
+  Table: main.default.zerobus_it_20260813104206 (dropped in teardown)
+  Grants: USE CATALOG main, USE SCHEMA main.default, MODIFY+SELECT on the table
+  Warehouse used for DDL/grants/verify: 148ccb90800933a1 (Shared Endpoint)
+
+The combined tls-async + cohttp-async switch (fl414-async-live) used for the
+Async run was a throwaway, removed after.

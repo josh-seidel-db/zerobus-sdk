@@ -1,0 +1,26 @@
+; Async REST test: Zerobus_rest_async against an in-process cohttp-async mock
+; playing both the OIDC token endpoint and the /insert endpoint (cleartext HTTP,
+; loopback). The Async counterpart of test_rest/test_rest_lwt.
+;
+; (optional): needs BOTH cohttp-async (only for the in-process mock server here)
+; AND tls-async (so zerobus-async selects the real Oauth.https_post backend the lib
+; uses — for cleartext http:// it connects over plain TCP, but the real backend
+; must be present to be exercised). The dir VANISHES on switches lacking either
+; (e.g. the canonical fl414) instead of erroring. It lights up on a combined
+; tls-async + cohttp-async switch, and runs in the NON-BLOCKING bespoke-switch CI
+; job (.github/workflows/ci-ocaml-async-bespoke.yml). The live path is also
+; validated directly by test_integration/ against a real workspace.
+(executable
+ (name test_rest_async)
+ (modules test_rest_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-rest-async zerobus-core core async unix cohttp-async yojson
+   alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_rest_async.exe)
+ (action
+  (run ./test_rest_async.exe)))

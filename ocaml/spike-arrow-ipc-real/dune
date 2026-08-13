@@ -1,0 +1,35 @@
+; Arrow IPC codec spike. The C++ stubs call the REAL Apache Arrow C++ IPC codec,
+; so we need Arrow's include/lib flags (via pkg-config, since the Homebrew path is
+; version-specific) and C++20 (Arrow 25.x headers use std::span / std::log2p1).
+;
+; pkg-config flags are captured into sexp files at build time and (:include)d, so
+; nothing hardcodes the Homebrew Cellar version path.
+
+(rule
+ (target arrow_cflags.sexp)
+ (action
+  (with-stdout-to
+   arrow_cflags.sexp
+   (run sh -c
+     "printf '(-std=c++20 ' && pkg-config --cflags arrow && printf ')'"))))
+
+; Emit link flags as (-cclib <tok> -cclib <tok> ...) so ocamlopt passes each
+; through to the C linker (bare -L/-l are not ocamlopt options).
+(rule
+ (target arrow_libs.sexp)
+ (action
+  (with-stdout-to
+   arrow_libs.sexp
+   (run sh -c
+     "printf '(' && for t in $(pkg-config --libs arrow) -lstdc++; do printf ' -cclib %s' \"$t\"; done && printf ' )'"))))
+
+(executable
+ (name test_arrow_ipc)
+ (modules arrow_ipc test_arrow_ipc)
+ (foreign_stubs
+  (language cxx)
+  (names arrow_ipc_stubs)
+  (flags
+   (:include arrow_cflags.sexp)))
+ (link_flags
+  (:include arrow_libs.sexp)))

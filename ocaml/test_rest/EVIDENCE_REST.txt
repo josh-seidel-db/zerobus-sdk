@@ -1,0 +1,33 @@
+ZEROBUS OCAML — Phase 7c (Zerobus_rest) evidence
+=================================================
+Date: 2026-08-11   Switch: fl414 (OCaml 4.14.1)
+
+WHAT: DESIGN §4.2 stateless REST insert helper (zerobus-rest package):
+  POST <endpoint>/zerobus/v1/tables/<catalog>.<schema>.<table>/insert
+  Authorization: Bearer <scoped-oauth-token>   Content-Type: application/json
+  [ {record}, ... ]
+Reuses zerobus-core Config.oauth_token_request_body (the same table-scoped
+client-credentials grant proven live in spike-live), cohttp-lwt HTTP client.
+Separate opam package so gRPC users don't pull it and REST-only users don't
+pull the h2/tls streaming stack. No streams/offsets/recovery.
+
+TEST: test_rest/test_rest_lwt.ml — in-process cohttp mock plays BOTH the OIDC
+token endpoint and the /insert endpoint (cleartext HTTP, loopback, ephemeral
+port). 8/8 alcotest green in 0.047s:
+  - basic-auth grant issued (HTTP Basic client auth on token endpoint)
+  - bearer token from grant attached to the insert request
+  - token cached: two inserts to same table -> exactly ONE mint
+  - records serialized as a single JSON array ([ ... ])
+  - insert path correct (/zerobus/v1/tables/<table>/insert) + 2xx -> Ok ()
+  - empty batch is a no-op (no request sent) -> Ok ()
+  - 3 inserts sent total (empty skipped)
+  - non-2xx (400) -> Error (Server_status { code = 400; ... })
+
+BUILD: dune build lib/rest/ + test_rest/ green; opam lint zerobus-rest.opam PASS.
+All prior fl414 targets still build; test_driver_lwt regression 3/3 green.
+
+CAVEAT: mock does not validate UC grant/schema server-side (needs live). This
+proves the full client flow (grant -> bearer -> JSON-array POST -> status
+handling -> token cache), not server-side schema acceptance. Live REST insert
+against a real workspace is the remaining (env-gated) step, same posture as the
+gRPC live checks.

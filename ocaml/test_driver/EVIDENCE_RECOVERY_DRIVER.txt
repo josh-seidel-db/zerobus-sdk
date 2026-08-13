@@ -1,0 +1,20 @@
+ZEROBUS OCAML PHASE 6 RECOVERY DRIVER TEST (Lwt) -- evidence
+captured: 2026-08-11 (fl414 / OCaml 4.14.1)
+
+Real Make(Io) driver (Zerobus.Driver) + mock EphemeralStream server that drops the
+FIRST stream after 50 acks with retryable gRPC status UNAVAILABLE, then serves the
+reconnect to completion. Driver: ingest 200 JSON (loop-then-flush) -> flush -> close.
+Recovery is invisible above ingest/flush.
+
+Testing `phase6-recovery'.
+  [OK]          reconnect-and-replay          0   no fatal error (recovered).
+  [OK]          reconnect-and-replay          1   flush succeeded after recovery.
+  [OK]          reconnect-and-replay          2   acks observed (watermark advanced).
+Test Successful. 3 tests run.
+
+Stable across 3 runs (exit 0 each). Proves: on a retryable mid-stream drop the
+driver reconnects (new bidi, re-sends CreateIngestStream + the un-acked tail in
+order), advances the durability watermark across the reconnect, and flush returns
+Ok. Bug found+fixed by this test: recv=None is ambiguous (clean OK end vs broken
+stream) because the gRPC status is in the trailer — the ack-reader now checks
+H2_client.status on end-of-stream and treats a retryable status as a failure.

@@ -1,0 +1,15 @@
+_build/
+
+# stray compiler/build artifacts (e.g. foreign-stub intermediates left in-tree)
+*.o
+*.o.tmp
+*.cmi
+*.cmo
+*.cmx
+*.a
+
+# ocaml-protoc output, regenerated from lib/core/proto/vendor/*.proto at build time
+/lib/core/proto/duration.ml
+/lib/core/proto/duration.mli
+/lib/core/proto/zerobus_service.ml
+/lib/core/proto/zerobus_service.mli

@@ -1,0 +1,12 @@
+; zerobus-eio: Eio (direct-style) instantiation of zerobus-core's IO functor.
+; Requires OCaml >= 5.0.
+; Eio needs OCaml-5 effects; disable the whole library on < 5.0 so a 4.14
+; `dune build` of the workspace (Lwt/Async) doesn't try to resolve eio.
+(library
+ (name zerobus_eio)
+ (public_name zerobus-eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-core grpc grpc-eio h2-eio eio eio_main eio.unix tls tls-eio
+   mirage-crypto-rng.unix x509 ca-certs domain-name cohttp-eio http yojson uri
+   base64))

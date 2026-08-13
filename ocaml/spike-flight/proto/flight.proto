@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+// Faithful subset of the real Apache Arrow Flight protocol (Flight.proto),
+// containing exactly what Zerobus's Arrow path uses: the DoPut RPC and the
+// FlightData / PutResult messages. Field numbers match upstream — in particular
+// FlightData.data_body = 1000 (Arrow places the payload at a high field number
+// so the length-prefixed body sits at the end of the wire).
+//
+// The point of the spike: prove these REAL Flight protobuf messages flow over a
+// client-initiated bidi gRPC stream in native OCaml, with the Arrow IPC bytes
+// carried as an OPAQUE data_body (no Arrow library) and the Zerobus per-batch
+// offset riding in app_metadata — exactly as rust/sdk/src/stream/arrow does.
+package arrow.flight.protocol;
+
+message FlightDescriptor {
+  enum DescriptorType {
+    UNKNOWN = 0;
+    PATH = 1;
+    CMD = 2;
+  }
+  DescriptorType type = 1;
+  bytes cmd = 2;
+  repeated string path = 3;
+}
+
+// The exchange unit of a DoPut stream. `data_header` + `data_body` together are
+// an Arrow IPC message (schema message first, then record-batch messages); this
+// spike treats them as opaque bytes. `app_metadata` carries the Zerobus offset.
+message FlightData {
+  FlightDescriptor flight_descriptor = 1;
+  bytes data_header = 2;
+  bytes app_metadata = 3;
+  bytes data_body = 1000;
+}
+
+// The server's per-put acknowledgment; Zerobus returns the durable offset in
+// `app_metadata`.
+message PutResult {
+  bytes app_metadata = 1;
+}
+
+service FlightService {
+  // Client-initiated bidirectional streaming: client streams FlightData batches,
+  // server streams PutResult acks. This is the only Flight RPC Zerobus uses.
+  rpc DoPut(stream FlightData) returns (stream PutResult) {}
+}

@@ -1,0 +1,58 @@
+name: OCaml CI (Async bespoke switch)
+
+on:
+  workflow_call:
+
+# The five Async test directories below exercise the Async runtime's live-TLS
+# transport and built-in OAuth against local mock servers. They need BOTH
+# tls-async (for the real Oauth.https_post backend + the TLS h2 mock) and
+# cohttp-async (only for the in-process mock token/insert endpoints). Installing
+# tls-async cascades a specific dependency set (async v0.15, grpc-async 0.1.0)
+# that the standard 4.14 job (ci-ocaml.yml) deliberately avoids — so these test
+# dirs are all (optional) and vanish there. This workflow builds the bespoke
+# switch and runs them.
+#
+# It is wired NON-BLOCKING in push.yml (excluded from `gate`): the pinned
+# tls-async.0.17.0 + cascade is more brittle than the standard switches, and the
+# same code paths are already validated live by test_integration/ against a real
+# workspace. Pinning tls-async to 0.17.0 keeps the switch on OCaml 4.14 (unpinned
+# pulls tls 2.0.4 -> OCaml 5.x). See ocaml/doc/arch/tls_async_status.md.
+
+jobs:
+  build-test-async-bespoke:
+    runs-on:
+      group: databricks-protected-runner-group
+      labels: linux-ubuntu-latest
+    defaults:
+      run:
+        working-directory: ocaml
+        shell: bash
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "4.14"
+          dune-cache: true
+      - name: Install OCaml dependencies (bespoke tls-async + cohttp-async)
+        run: |
+          opam install -y --deps-only ./zerobus-core.opam ./zerobus-async.opam \
+            ./zerobus-rest-async.opam ./zerobus-otlp-async.opam
+          opam install -y ocaml-protoc
+          # tls-async pinned to 0.17.0 to stay on OCaml 4.14; cohttp-async for the
+          # in-process mock endpoints; opentelemetry for the cross-impl OTLP test's
+          # canonical (Lwt) collector, which test_otlp_otel_async spawns.
+          opam install -y tls-async.0.17.0 cohttp-async
+          opam install -y opentelemetry opentelemetry-client-cohttp-lwt
+      # test_otlp_async is intentionally NOT run here: its mock collector uses
+      # Grpc_async.Server, which only exists in grpc-async 0.2.0 (async v0.16),
+      # but tls-async.0.17.0 pins async to v0.15 / grpc-async 0.1.0 — the two
+      # cannot coexist on one switch (grpc-async 0.2.0 removes tls-async). Async
+      # OTLP export is already covered on THIS switch by test_otlp_otel_async,
+      # whose collector deliberately runs on Lwt (grpc-lwt 0.1.0 HAS a server) to
+      # sidestep exactly this. See ocaml/test_otlp_async/dune.
+      - name: Test (Async bespoke switch)
+        run: |
+          for d in test_driver_async_tls test_driver_async_oauth test_rest_async test_otlp_otel_async; do
+            echo "== dune test $d =="
+            opam exec -- dune test "$d/"
+          done

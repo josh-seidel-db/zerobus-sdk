@@ -1,0 +1,8 @@
+; zerobus-core: the runtime-agnostic core. Re-exports the generated wire types
+; and (Phase 2) the IO functor surface: Error, Grpc_transport.S, the IO signature,
+; and the Make(Io) streaming driver skeleton. Links NO runtime — Lwt/Eio/Async
+; are supplied by the per-runtime packages that instantiate Make.
+(library
+ (name zerobus_core)
+ (public_name zerobus-core)
+ (libraries zerobus_proto pbrt uri))

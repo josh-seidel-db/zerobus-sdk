@@ -1,0 +1,39 @@
+; In-tree Async live-TLS test: drives the Zerobus_async façade over a REAL
+; TLS 1.3 + ALPN-h2 handshake against a self-signed h2 mock (separate process).
+; The Async counterpart of test_driver_eio/{test_tls_eio,tls_server_eio}.
+;
+; Builds ONLY on a switch that has tls-async (+ the pinned h2 0.12 the SDK lib
+; needs). (optional) makes dune SKIP the whole dir on switches without tls-async
+; (fl414, zbeio) instead of erroring — so it never breaks the normal per-switch
+; builds; it lights up on a tls-async-equipped switch (see doc/arch/tls_async_status.md).
+;
+; NOTE: on a tls-async switch, grpc-async is 0.1.0 (no Grpc_async.Server), so the
+; mock drives H2.Server_connection directly (see tls_server_async.ml) — it does
+; NOT depend on grpc-async.
+
+(executable
+ (name tls_server_async)
+ (modules tls_server_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-core.proto pbrt core core_unix async h2 tls tls-async x509
+   mirage-crypto-rng mirage-crypto-rng.unix base64 ptime bigstringaf))
+
+; An (executable), not (tests): (optional) — which makes the dir vanish on
+; switches without tls-async — is only accepted on executables/libraries, not on
+; a (tests) stanza. Run it directly (with a watchdog): ./test_tls_async.exe.
+(executable
+ (name test_tls_async)
+ (modules test_tls_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-async zerobus-core core core_unix async unix tls-async
+   alcotest))
+
+(rule
+ (alias runtest)
+ (deps tls_server_async.exe test_tls_async.exe)
+ (action
+  (run ./test_tls_async.exe)))

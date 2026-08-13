@@ -1,0 +1,9 @@
+ZEROBUS OCAML LIVE-TLS TEST (Eio) -- evidence
+tls: TLS1.3 + ALPN h2 (self-signed cert, cert-fingerprint pinned)
+positive (correct fp): 3/3 pass, 200 records acked over TLS
+negative (wrong fp): handshake REJECTED — 'authentication failure: fingerprint ... does not match' (proves cert verification is enforced)
+
+[0m  [32m[OK][0m          [36mlive-tls[0m          0   no error.
+  [32m[OK][0m          [36mlive-tls[0m          1   all records issued.
+  [32m[OK][0m          [36mlive-tls[0m          2   flush confirms all acked over TLS.
+[32mTest Successful[0m in 0.119s. 3 tests run.

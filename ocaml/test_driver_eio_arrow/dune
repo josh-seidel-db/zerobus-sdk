@@ -1,0 +1,23 @@
+; Eio Arrow test: the public Zerobus_eio façade auto-selects the Arrow Flight
+; DoPut driver (record_type=Arrow) with REAL Arrow IPC from zerobus-arrow, against
+; a separate-process grpc-eio Flight mock. The Eio counterpart of test_driver_arrow
+; (Lwt) and test_driver_async_arrow. Runs on OCaml >= 5.0; needs libarrow
+; (PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig).
+(executable
+ (name flight_arrow_server_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules flight_arrow_server_eio)
+ (libraries zerobus-core.proto zerobus-arrow grpc grpc-eio h2-eio eio eio_main
+   eio.unix pbrt))
+
+(test
+ (name test_arrow_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules test_arrow_eio)
+ ; The Flight mock is spawned as a separate process, so it must be built before
+ ; the test runs (otherwise `dune test` on a clean tree ENOENTs on the exe).
+ (deps flight_arrow_server_eio.exe)
+ (libraries zerobus-eio zerobus-core zerobus-core.proto zerobus-arrow eio
+   eio_main eio.unix unix alcotest))

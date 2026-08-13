@@ -1,0 +1,9 @@
+; Eio REST test: Zerobus_rest_eio against an in-process cohttp-eio mock playing
+; both the OIDC token endpoint and the /insert endpoint (cleartext HTTP,
+; loopback). Runs only on OCaml >= 5.0 (Eio).
+(test
+ (name test_rest_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-rest-eio zerobus-core cohttp-eio eio eio_main eio.unix http
+   uri yojson unix alcotest))

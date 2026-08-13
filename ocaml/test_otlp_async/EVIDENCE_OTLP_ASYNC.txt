@@ -1,0 +1,11 @@
+ZEROBUS OCAML — ASYNC OTLP parity (#6) — evidence
+switch         : fl414-rest-otlp-async (fl414 clone + cohttp-async 6.0; THROWAWAY, removed after)
+lib            : lib/otlp/async/zerobus_otlp_async.{ml,mli} — unary LogsService/MetricsService
+                 Export over Zerobus_async.Io_async_for_test.H2_client; cohttp-async token.
+                 Package zerobus-otlp-async — (optional) on cohttp-async. Reuses zerobus-otlp.proto.
+test           : test_otlp_async/ — separate-proc grpc-async collector otlp_collector_async.ml
+                 (Unary RPCs) spawned via Async Process.create_exn; cohttp-async token endpoint.
+result         : 7/7 GREEN
+  logs ok rejected=0, metrics ok rejected=0, partial-success (REJECT1) rejected=1,
+  empty no-op, token cached (1 mint).
+note           : (optional) → VANISHES on canonical fl414; NOT in CI. Lwt (test_otlp) is reference.

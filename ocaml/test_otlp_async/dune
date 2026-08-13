@@ -1,0 +1,38 @@
+; Async OTLP test: Zerobus_otlp_async against a separate-process grpc-async mock
+; collector (cleartext h2c) + an in-process cohttp-async OIDC token endpoint. The
+; Async counterpart of test_otlp/test_otlp_lwt.
+;
+; (optional): needs BOTH cohttp-async (only for the in-process mock token endpoint
+; here) AND tls-async (so zerobus-async selects the real Oauth backend the lib
+; uses). The dir VANISHES on switches lacking either (e.g. the canonical fl414)
+; instead of erroring. It lights up on a combined tls-async + cohttp-async switch.
+;
+; Uniquely NOT in CI even on the bespoke-switch job: this dir's mock collector
+; (otlp_collector_async.ml) uses Grpc_async.Server, which only exists in
+; grpc-async 0.2.0 (async v0.16) — but tls-async.0.17.0 pins async to v0.15 /
+; grpc-async 0.1.0, and the two cannot coexist on one switch. The Async OTLP
+; export path is covered in that job by test_otlp_otel_async (Lwt collector) and
+; live by test_integration/. This dir stays runnable on a hypothetical async-v0.16
+; + tls-async switch, should one ever exist.
+(executable
+ (name otlp_collector_async)
+ (modules otlp_collector_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-otlp.proto grpc grpc-async h2-async core async pbrt))
+
+(executable
+ (name test_otlp_async)
+ (modules test_otlp_async)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries zerobus-otlp-async zerobus-otlp.proto zerobus-core core core_unix
+   async unix cohttp-async yojson alcotest))
+
+(rule
+ (alias runtest)
+ (deps test_otlp_async.exe otlp_collector_async.exe)
+ (action
+  (run ./test_otlp_async.exe)))

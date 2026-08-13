@@ -1,0 +1,6 @@
+ZEROBUS OCAML PUBLIC-API (FACADE) TEST (Eio) -- evidence
+
+[0m  [32m[OK][0m          [36mpublic-api[0m          0   no error.
+  [32m[OK][0m          [36mpublic-api[0m          1   all records issued.
+  [32m[OK][0m          [36mpublic-api[0m          2   flush confirms all acked.
+[32mTest Successful[0m in 0.221s. 3 tests run.

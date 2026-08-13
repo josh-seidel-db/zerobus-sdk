@@ -1,0 +1,21 @@
+; Async live-TLS spike: H2 core pumped over a Tls_async duplex (no gluten-async /
+; h2-async). Builds ONLY on a switch that has async + tls-async + h2 (core) — i.e.
+; the throwaway fl414-asyncspike switch, NOT fl414/zbeio. Not part of CI.
+; (optional): dune skips this executable on switches that lack tls-async (fl414,
+; zbeio) instead of erroring — it only builds on a tls-async-equipped switch.
+(executable
+ (name ingest_live)
+ (modules ingest_live h2_async_tls)
+ (optional)
+ (preprocess
+  (pps ppx_let))
+ (libraries
+  zerobus-core.proto
+  pbrt
+  core
+  async
+  h2
+  tls
+  tls-async
+  ca-certs
+  domain-name))

@@ -1,0 +1,23 @@
+ZEROBUS OCAML — LIVE PROTO VALIDATION (follow-up to D1 gate B)
+timestamp_utc : 2026-08-11T15:47:52Z
+endpoint      : 984752964297111.zerobus.eastus2.azuredatabricks.net:443 (TLS1.3 + ALPN h2)
+rpc           : databricks.zerobus.Zerobus/EphemeralStream (bidi)
+record_type   : PROTO — real google.protobuf.DescriptorProto (34 bytes) for {id:int64=1; name:string=2}
+table         : zerobus_ocaml_test.ingest.records (id BIGINT, name STRING)  [created + torn down]
+
+RESULT: PASS
+- CreateIngestStreamResponse received (stream_id=b0db2220-1f94-4411-b877-73ebc11ec7d5)
+- http=200, grpc-status=0, no decode/transport error
+- 5 proto-encoded rows ingested; VERIFIED PERSISTED by querying the table:
+    id | name
+    0  | row-0
+    1  | row-1
+    2  | row-2
+    3  | row-3
+    4  | row-4
+  => the live server validated the DescriptorProto against the table schema AND
+     correctly decoded the proto rows (field 1 int64 -> id, field 2 string -> name).
+
+TEARDOWN (all done): table + schema + catalog dropped (CASCADE); SP secret deleted
+(secret_count=0); SP removed from workspace (inert account shell remains, no secrets);
+local secret cache ($HOME/.cache/zerobus-proto-live) scrubbed.

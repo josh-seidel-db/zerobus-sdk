@@ -1,0 +1,42 @@
+======================================================================
+ ZEROBUS OCAML SDK -- ASYNC TRANSPORT SPIKE: CAPTURED EVIDENCE
+ Regenerate: cd ocaml/spike-async && dune runtest --force  (see README)
+======================================================================
+
+-- Toolchain of record ----------------------------------------------
+host_os : Darwin 25.5.0 arm64
+ocaml   : The OCaml toplevel, version 4.14.1
+dune    : 3.22.2
+opam    : alcotest 1.9.1
+opam    : async v0.16.0
+opam    : core v0.16.2
+opam    : gluten 0.5.1
+opam    : gluten-async 0.5.1
+opam    : grpc 0.2.0
+opam    : grpc-async 0.2.0
+opam    : h2 0.12.0
+opam    : h2-async 0.12.0
+opam    : ocaml-protoc 4.1
+opam    : pbrt 4.1
+
+-- Measured facts (fresh run; server in a separate process) ---------
+timestamp_utc          : 2026-08-10T21:40:51Z
+ocaml_version          : 4.14.1
+runtime                : Async (server in separate process)
+records_sent           : 200
+acks_received          : 200
+sends_done_at_first_ack: 11 (of 200)  <- proves ack arrived mid-send
+first_offset           : 0
+last_offset            : 199
+offsets_contiguous     : true
+
+-- Test verdict (alcotest) ------------------------------------------
+  [OK]          bidi streaming (async)          0   all records acked.
+  [OK]          bidi streaming (async)          1   acks interleave with sends.
+  [OK]          bidi streaming (async)          2   offsets are monotonic.
+Test Successful in 0.001s. 3 tests run.
+
+CONCLUSION: grpc-async 0.2.0 + h2-async 0.12.0 on OCaml 4.14.1/Async sustain
+client-initiated bidirectional streaming with acks interleaved during sends
+(first ack at send #~14 of 200). The zerobus-async package path is VIABLE and
+VALIDATED as v1 scope alongside zerobus (Lwt) and zerobus-eio (Eio).

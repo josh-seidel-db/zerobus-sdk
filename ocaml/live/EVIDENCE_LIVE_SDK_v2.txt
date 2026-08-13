@@ -1,0 +1,85 @@
+ZEROBUS OCAML — LIVE SDK TEST v2 (Arrow fix + timeout + Eio parity + Async probe)
+=================================================================================
+Date: 2026-08-11   Workspace: adb-984752964297111.11.azuredatabricks.net (Azure
+field-eng, eastus2). Follow-up to EVIDENCE_LIVE_SDK.txt.
+
+SCOPE: fix the Arrow framing bug found in v1, wire flush timeout, add a config
+unit test, bring Eio to Proto+Arrow parity, and attempt Async live TLS. All live
+runs drive the SHIPPED public SDK API (create/create_stream OAuth/ingest/flush).
+
+RESULTS (live, rows VERIFIED PERSISTED in Delta unless noted)
+-------------------------------------------------------------
+  Runtime  Record  Result   Notes
+  Lwt      JSON    PASS     (v1, still good)
+  Lwt      Proto   PASS     (v1, still good)
+  Lwt      Arrow   PASS *** FIXED — see below; 5 rows persisted, id/name faithful
+  Eio      JSON    PASS     (v1)
+  Eio      Proto   PASS *** NEW — Eio façade passes record_type=Proto through
+  Eio      Arrow   PASS *** NEW — Eio façade now auto-selects Flight (parity w/ Lwt)
+  Async    any     BLOCKED  live TLS unavailable (deep packaging incompat; see doc)
+
+1) ARROW FRAMING BUG — FIXED
+   v1 failure: server rejected DoPut payload grpc-status=3 "Arrow Flight stream
+   decode error ... Type i32 ... unaligned ... 8002". Root cause (confirmed against
+   the Rust SDK): our codec stuffed a whole self-contained Arrow IPC *stream* into
+   FlightData.data_body and put bogus strings in data_header. The real wire format:
+     - schema sent ONCE as the first FlightData's data_header (schema IPC message
+       metadata FlatBuffer), no body;
+     - each record: data_header = record-batch IPC message metadata FlatBuffer,
+       data_body = raw buffers padded to 8-byte alignment;
+     - app_metadata = JSON {"offset_id":N}.
+   Fix:
+     - zerobus_arrow_stubs.cc: use GetSchemaPayload / GetRecordBatchPayload with
+       IpcWriteOptions.alignment=8; expose schema_message() + encode() that returns
+       a PACKED [4B BE header_len][header][body] blob; decode(~schema_message).
+     - lib/core/flight_protocol.ml: create_frame sends the schema (carried in
+       table.descriptor) as first data_header; record_frame splits the packed blob
+       into data_header/data_body; app_metadata=JSON offset_id; decode_ack parses
+       {"ack_up_to_offset":N,...} (the real ack) and {"offset_id":N} and bare int64.
+   Live proof: server accepted the stream, sent preliminary {"ack_up_to_offset":-1}
+   then {"ack_up_to_offset":4,"ack_up_to_records":5}; 5 Arrow rows persisted.
+   Also fixed offline: test_driver_arrow mock now uses the real ack JSON; 3/3 green
+   on both switches.
+
+2) FLUSH TIMEOUT — WIRED
+   flush_timeout_ms / server_lack_of_ack_timeout_ms were defined but ignored, so a
+   non-acking server hung flush forever (v1 symptom before the wsid fix). Now
+   wait_for_offset forks a one-shot timer into the stream scope; flush returns
+   Error (Timeout _) if no ack arrives in the window. New offline test
+   test_driver/test_flush_timeout_lwt (+ ephemeral_server_noack): flush returns
+   Timeout in ~1.5s, 2/2 green.
+
+3) CONFIG UNIT TEST — ADDED
+   test/test_config.ml locks in the v1 workspace_id_of_url fix (Azure adb-<id>,
+   GCP numeric, first-digit-run-wins, no-digits->Error). 8/8 green.
+
+4) EIO PROTO + ARROW PARITY — ADDED
+   Proto already worked (Ephemeral protocol handles JSON+Proto); it just hadn't
+   been run live on Eio — now PASS. Arrow needed wiring: lib/eio/zerobus_io_eio.ml
+   now names Io_impl and adds Stream_flight = Make_with_protocol(Io)(Flight_protocol)
+   (mirrors Lwt); lib/eio/zerobus_eio.ml gains a stream_impl variant
+   (Ephemeral|Flight) dispatched on record_type, exactly like the Lwt façade. Live
+   Eio Proto + Arrow both PASS, rows persisted. Eio offline tests still 3/3.
+
+5) ASYNC LIVE TLS — attempted, BLOCKED (documented deeper)
+   On a throwaway switch (fl414 kept pristine): even installing tls-async and
+   forcing gluten-async to rebuild against it FAILS — gluten-async 0.5.2's
+   tls_io.real.ml doesn't compile against tls 0.17.0 (Tls.Config.client became a
+   result); and the whole solve downgrades async to v0.15 / drops grpc-async. This
+   is an upstream version-incompatibility triangle, not just the build-time select
+   opam can't see. Real path forward (documented in doc/arch/tls_async_status.md):
+   bypass gluten-async's tls_io entirely — TLS via Tls_async.connect directly (it
+   builds and yields a cleartext Reader/Writer with ALPN), then drive the h2 core
+   over it, mirroring the Lwt transport. Not completed this session. Async remains
+   mock-only (tls:false). Throwaway switch removed; fl414/zbeio intact.
+
+CLOUD RESOURCES (created then TORN DOWN)
+----------------------------------------
+- SP "zerobus-ocaml-arrowfix-livetest" id=142998091485728
+  appId=14884f70-9e1a-4971-9a80-254bc0a74c09 + 1 secret ($HOME/.cache 0600).
+  Secret DELETED (0 remaining); SP removed at workspace level; inert account shell
+  remains (no secrets, needs account-admin). Catalog zerobus_ocaml_test DROP CASCADE.
+  Local secret cache scrubbed.
+- Debug instrumentation added during diagnosis was reverted from lib/; the Arrow,
+  flush-timeout, config, and Eio-parity changes are KEPT. All offline tests green
+  on both switches after.

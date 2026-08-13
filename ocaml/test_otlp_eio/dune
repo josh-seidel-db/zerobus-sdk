@@ -1,0 +1,21 @@
+; Eio OTLP test: Zerobus_otlp_eio against a separate-process grpc-eio mock
+; collector (cleartext h2c) + an in-process cohttp-eio OIDC token endpoint. Runs
+; only on OCaml >= 5.0 (Eio). The collector is a separate executable spawned by
+; the test (the proven separate-process topology).
+(executable
+ (name otlp_collector_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules otlp_collector_eio)
+ (libraries zerobus-otlp.proto grpc grpc-eio h2-eio eio eio_main eio.unix pbrt))
+
+(test
+ (name test_otlp_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (modules test_otlp_eio)
+ ; The collector is spawned as a separate process, so it must be built before
+ ; the test runs (otherwise `dune test` on a clean tree ENOENTs on the exe).
+ (deps otlp_collector_eio.exe)
+ (libraries zerobus-otlp-eio zerobus-otlp.proto zerobus-core cohttp-eio eio
+   eio_main eio.unix http uri unix alcotest))

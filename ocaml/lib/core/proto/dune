@@ -1,0 +1,86 @@
+; Proto codegen for zerobus-core.
+;
+; The authoritative Zerobus wire schema is vendored VERBATIM under vendor/ from
+; rust/sdk/zerobus_service.proto (the single source of truth for every SDK), plus
+; the one well-known-type it imports (google/protobuf/duration.proto). Keeping the
+; vendored copy byte-identical lets us diff it against the source to detect drift.
+;
+; ocaml-protoc 4.1 cannot parse proto2 `reserved` statements (comment-only, no
+; wire effect), so we strip those lines into a build-tree copy before codegen.
+; This is the only transform applied to the vendored schema. See D1 gate A in
+; PLAN.md.
+
+; Strip `reserved` statements into a build-tree copy named zerobus_service.proto
+; (so the generated module is Zerobus_service, not Zerobus_service_stripped).
+(rule
+ (target zerobus_service.proto)
+ (deps vendor/zerobus_service.proto)
+ (action
+  (with-stdout-to
+   zerobus_service.proto
+   (run sed -E "/^[[:space:]]*reserved /d" vendor/zerobus_service.proto))))
+
+; Generate the imported well-known type first (referenced as the Duration module).
+(rule
+ (targets duration.ml duration.mli)
+ (deps vendor/google/protobuf/duration.proto)
+ (action
+  (run
+   ocaml-protoc
+   --binary
+   --make
+   -I
+   vendor
+   --ml_out
+   .
+   vendor/google/protobuf/duration.proto)))
+
+; Generate the descriptor types (DescriptorProto, FieldDescriptorProto, etc.)
+; These are needed for the Proto record_type integration test.
+(rule
+ (targets descriptor.ml descriptor.mli)
+ (deps vendor/google/protobuf/descriptor.proto)
+ (action
+  (run
+   ocaml-protoc
+   --binary
+   --make
+   -I
+   vendor
+   --ml_out
+   .
+   vendor/google/protobuf/descriptor.proto)))
+
+; Generate the Zerobus service types. The duration import is resolved via -I vendor.
+(rule
+ (targets zerobus_service.ml zerobus_service.mli)
+ (deps zerobus_service.proto vendor/google/protobuf/duration.proto)
+ (action
+  (run
+   ocaml-protoc
+   --binary
+   --make
+   -I
+   vendor
+   -I
+   .
+   --ml_out
+   .
+   zerobus_service.proto)))
+
+; Generate the Arrow Flight types (FlightData / PutResult / FlightDescriptor).
+; Standalone proto (no imports); carries the Arrow IPC payload as an opaque
+; data_body — needs NO libarrow, so it lives in core and lets any runtime façade
+; select the Flight DoPut protocol without pulling the Arrow codec.
+(rule
+ (targets flight.ml flight.mli)
+ (deps vendor/flight.proto)
+ (action
+  (run ocaml-protoc --binary --make -I vendor --ml_out . vendor/flight.proto)))
+
+; Wire types library. pbrt is the ocaml-protoc runtime.
+(library
+ (name zerobus_proto)
+ (public_name zerobus-core.proto)
+ (modules duration descriptor zerobus_service flight)
+ (libraries pbrt))

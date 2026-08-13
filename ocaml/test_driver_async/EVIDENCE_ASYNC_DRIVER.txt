@@ -1,0 +1,10 @@
+ZEROBUS OCAML PHASE 5 DRIVER TEST (Async) -- evidence
+ocaml_version : 4.14.1
+records_issued: 200
+flush_all_acked: true
+error         : none
+
+[0m  [32m[OK][0m          [36mloop-then-flush[0m          0   no error.
+  [32m[OK][0m          [36mloop-then-flush[0m          1   all records issued.
+  [32m[OK][0m          [36mloop-then-flush[0m          2   flush confirms all acked.
+[32mTest Successful[0m in 0.001s. 3 tests run.

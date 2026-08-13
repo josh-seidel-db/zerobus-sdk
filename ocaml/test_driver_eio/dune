@@ -1,0 +1,32 @@
+; Phase 5 driver test on the Eio runtime: the runtime-agnostic Make(Io) driver
+; over the direct-style Eio instantiation, against a mock EphemeralStream server
+; (separate process, cleartext h2c). OCaml >= 5.0 only (Eio needs 5.x effects),
+; so this lives in its own dir — the fl414 (4.14) workspace build skips it, and
+; it can't share test_driver/'s Lwt-based dune (no grpc-lwt on the zbeio switch).
+;
+; - ephemeral_server_eio: well-behaved backend (Phase 5 loop-then-flush)
+
+(executable
+ (name ephemeral_server_eio)
+ (modules ephemeral_server_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-core.proto pbrt grpc grpc-eio h2-eio eio eio_main eio.unix))
+
+; Self-signed TLS h2 mock — exercises the transport's real TLS+ALPN path.
+(executable
+ (name tls_server_eio)
+ (modules tls_server_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-core.proto pbrt grpc grpc-eio h2-eio eio eio_main eio.unix
+   tls tls-eio x509 mirage-crypto-rng.unix base64 ptime))
+
+(tests
+ (names test_driver_eio test_facade_eio test_tls_eio test_oauth_eio)
+ (modules test_driver_eio test_facade_eio test_tls_eio test_oauth_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (deps ephemeral_server_eio.exe tls_server_eio.exe)
+ (libraries zerobus-eio zerobus-core eio eio_main eio.unix unix
+   x509 ptime ptime.clock.os cohttp-eio http alcotest))

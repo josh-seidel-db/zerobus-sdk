@@ -1,0 +1,48 @@
+; OTLP proto codegen for zerobus-otlp (DESIGN §4.3).
+;
+; The OpenTelemetry collector protos (LogsService/MetricsService Export) + their
+; transitive deps are vendored VERBATIM under vendor/opentelemetry/proto/... from
+; opentelemetry-proto v1.3.2 (see vendor/README.md). They are independent of the
+; Zerobus wire protos.
+;
+; Unlike the Zerobus proto2 schema, these proto3 files need NO transform:
+; ocaml-protoc 4.1 parses their numeric `reserved` statements directly. Imports
+; are by full path (e.g. "opentelemetry/proto/common/v1/common.proto"), resolved
+; via `-I vendor`. ocaml-protoc emits one flat module per file (Common, Resource,
+; Logs, Metrics, Logs_service, Metrics_service); cross-file imports resolve at
+; compile time.
+
+(rule
+ (targets
+  common.ml common.mli
+  resource.ml resource.mli
+  logs.ml logs.mli
+  metrics.ml metrics.mli
+  logs_service.ml logs_service.mli
+  metrics_service.ml metrics_service.mli)
+ (deps
+  (source_tree vendor))
+ (action
+  (progn
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/common/v1/common.proto)
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/resource/v1/resource.proto)
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/logs/v1/logs.proto)
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/metrics/v1/metrics.proto)
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/collector/logs/v1/logs_service.proto)
+   (run ocaml-protoc --binary --make -I vendor --ml_out .
+    vendor/opentelemetry/proto/collector/metrics/v1/metrics_service.proto))))
+
+; The generated OTLP wire types. -30 silences the duplicate `values` label in
+; common.proto's AnyValue/ArrayValue/KeyValueList (see vendor/README.md).
+(library
+ (name zerobus_otlp_proto)
+ (public_name zerobus-otlp.proto)
+ (modules common resource logs metrics logs_service metrics_service)
+ (flags
+  (:standard -w -30))
+ (libraries pbrt))

@@ -1,0 +1,27 @@
+; Generate OCaml types + encoders/decoders from the recovery spike proto.
+(rule
+ (targets ingest.ml ingest.mli)
+ (deps proto/ingest.proto)
+ (action
+  (run ocaml-protoc --binary --make --ml_out . %{deps})))
+
+(library
+ (name ingest_proto)
+ (modules ingest)
+ (libraries pbrt))
+
+; Standalone mock server subprocess: acks by client_seq, breaks the first stream
+; after 50 acks with a retryable status. Port = argv.(1) (0 => 50561).
+(executable
+ (name ingest_server_recovery)
+ (modules ingest_server_recovery)
+ (libraries ingest_proto grpc grpc-lwt h2-lwt-unix lwt lwt.unix))
+
+; Recovery test driver: spawns the server, awaits READY, drives the recovery
+; client (reconnect + replay un-acked tail), asserts all acked exactly once /
+; contiguous / recovery triggered. Separate-process topology (proven pattern).
+(test
+ (name recovery_spike)
+ (modules recovery_spike)
+ (deps ingest_server_recovery.exe)
+ (libraries ingest_proto grpc grpc-lwt h2-lwt-unix lwt lwt.unix unix alcotest))

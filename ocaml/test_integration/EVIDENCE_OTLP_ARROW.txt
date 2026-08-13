@@ -1,0 +1,53 @@
+ZEROBUS OCAML — OTLP cross-impl + Arrow validation across all runtimes
+=======================================================================
+Date        : 2026-08-12
+Workspace   : adb-984752964297111.11.azuredatabricks.net (Azure eastus2)
+Endpoint    : 984752964297111.zerobus.eastus2.azuredatabricks.net:443
+
+============================================================
+PART 1 — OTLP wire-compatibility vs the CANONICAL OpenTelemetry protos (offline)
+============================================================
+The plain test_otlp[_eio|_async] mocks decode with OUR vendored Zerobus_otlp_proto,
+so a symmetric-codec bug would pass. These NEW tests decode our exporter's Export
+requests with the INDEPENDENT upstream `opentelemetry` OCaml package's protos
+(module Opentelemetry_proto, findlib `opentelemetry.proto`) — proving genuine OTLP
+interoperability, not self-consistency.
+
+  test_otlp_otel/       (Lwt)   7/7 — canonical collector decoded 2 log records,
+                                       severity INFO, partial-success (REJECT1)=1.
+  test_otlp_otel_eio/   (Eio)   7/7 — same, grpc-eio collector.
+  test_otlp_otel_async/ (Async) 7/7 — same; reuses the Lwt canonical collector
+                                       binary (the async-live switch carries
+                                       grpc-async 0.1.0 w/o Grpc_async.Server, while
+                                       grpc-lwt 0.1.0 provides one; the client under
+                                       test is Async — collector runtime is moot).
+
+  Note: our vendored protos are opentelemetry-proto v1.3.2 (8 log_record fields);
+  the canonical package's are newer (9 fields, adds event_name). The canonical
+  decoder still reads our bytes correctly — protobuf field-number compatibility
+  confirmed across independent codegen.
+
+============================================================
+PART 2 — Arrow + OTLP live across all 3 runtimes (real workspace)
+============================================================
+The live integration suites gained a gRPC Arrow case (real zerobus-arrow / libarrow
+IPC over Flight DoPut). Arrow had NEVER run live on Async before this. Two tables:
+  main  = main.default.zerobus_it_20260812080149        (JSON + Proto + REST)
+  arrow = main.default.zerobus_it_arrow_20260812080149  (Arrow only)
+
+All three runtimes: 5/5 cases PASS; rows verified PERSISTED by SQL:
+
+  Lwt  (fl414)            : 5/5 — main=15 (3x5), arrow=5  {id,name} rows 0..4
+  Eio  (zbeio)           : 5/5 — main=15,        arrow=5
+  Async(fl414-async-live): 5/5 — main=15,        arrow=5  (FIRST live Async Arrow)
+
+Per interface (all runtimes): gRPC JSON, gRPC Proto, gRPC Arrow each persisted 5
+rows; REST insert persisted 5 rows; OTLP LogsService/Export returned gRPC OK.
+
+Also confirms Apache Arrow works across ALL runtimes end to end:
+  - offline mock: test_driver_arrow (Lwt), test_driver_async_arrow (Async), and
+    NEW test_driver_eio_arrow (Eio) — closing the Eio Arrow-test gap. 3/3 each.
+  - live: Lwt + Eio + Async as above.
+
+Cloud resources created for the run and TORN DOWN after (tables dropped, secret
+deleted, local secrets scrubbed, throwaway async switch removed).
