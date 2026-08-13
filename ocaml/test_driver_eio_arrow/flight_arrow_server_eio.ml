@@ -1,8 +1,9 @@
 (** Driver-level Arrow-Flight/DoPut mock server — Eio. The Eio counterpart of
-    test_driver_arrow/flight_arrow_server.ml, on the grpc-eio / h2-eio stack. Links
-    REAL libarrow and decodes each FlightData.data_body via {!Zerobus_arrow.decode}
-    (so a corrupt / non-Arrow body is caught), then acks the durable offset as JSON
-    in PutResult.app_metadata — the watermark the Flight PROTOCOL reads.
+    test_driver_arrow/flight_arrow_server.ml, on the grpc-eio / h2-eio stack.
+    Links REAL libarrow and decodes each FlightData.data_body via
+    {!Zerobus_arrow.decode} (so a corrupt / non-Arrow body is caught), then acks
+    the durable offset as JSON in PutResult.app_metadata — the watermark the
+    Flight PROTOCOL reads.
 
     Separate-process topology; cleartext h2c. *)
 

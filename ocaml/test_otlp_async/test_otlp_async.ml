@@ -1,18 +1,20 @@
-(** Async OTLP acceptance: {!Zerobus_otlp_async} (the OTLP logs/metrics exporter,
-    Async runtime) against a mock OTLP collector (separate process, cleartext h2c)
+(** Async OTLP acceptance: {!Zerobus_otlp_async} (the OTLP logs/metrics
+    exporter, Async runtime) against a mock OTLP collector (separate process,
+    cleartext h2c)
     + an in-process cohttp-async OIDC token endpoint.
 
     The Async counterpart of test_otlp/test_otlp_lwt.ml — same coverage, Async
     idioms. Proves the full otlp/grpc flow end-to-end without a live workspace:
-    - the exporter mints a table-scoped token (client-credentials grant) and opens
-      a TLS-off h2c connection to the collector via the Async H2 client;
+    - the exporter mints a table-scoped token (client-credentials grant) and
+      opens a TLS-off h2c connection to the collector via the Async H2 client;
     - a batch of OTel logs is framed as a valid ExportLogsServiceRequest, the
       collector DECODES it (proving the wire types + framing), and returns OK;
     - likewise for metrics via MetricsService/Export;
     - a partial-success response (rejected > 0) is surfaced to the caller;
     - an empty batch is a no-op (no RPC), and the token is cached (one mint).
 
-    Cleartext h2c, loopback, ephemeral ports. Runs on a switch with cohttp-async. *)
+    Cleartext h2c, loopback, ephemeral ports. Runs on a switch with
+    cohttp-async. *)
 
 open! Core
 open! Async
@@ -144,9 +146,10 @@ let () =
      metrics_export: ok=%b rejected=%Ld\n\
      partial_success (REJECT1): rejected=%Ld (expect 1)\n\
      empty_is_noop : %b\n\
-     token_mints   : %d (expect 1 — cached across exports)\n%!"
-    result.logs_ok result.logs_rejected result.metrics_ok result.metrics_rejected
-    result.partial_rejected result.empty_ok result.mints;
+     token_mints   : %d (expect 1 — cached across exports)\n\
+     %!"
+    result.logs_ok result.logs_rejected result.metrics_ok
+    result.metrics_rejected result.partial_rejected result.empty_ok result.mints;
   Alcotest.run "async-otlp"
     [
       ( "otlp-export-async",
@@ -159,7 +162,8 @@ let () =
               Alcotest.(check bool) "metrics ok" true result.metrics_ok);
           Alcotest.test_case "metrics fully accepted (0 rejected)" `Slow
             (fun () ->
-              Alcotest.(check int64) "metrics rejected" 0L result.metrics_rejected);
+              Alcotest.(check int64)
+                "metrics rejected" 0L result.metrics_rejected);
           Alcotest.test_case "partial success surfaced (1 rejected)" `Slow
             (fun () ->
               Alcotest.(check int64) "partial" 1L result.partial_rejected);

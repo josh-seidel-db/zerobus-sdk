@@ -1,8 +1,8 @@
-(** Mock Zerobus [EphemeralStream] server that accepts the stream but NEVER acks —
-    it replies to [CreateStream] with a stream_id, then silently drops every
-    [IngestRecord] (no [durability_ack_up_to_offset] ever sent). Used to prove the
-    driver's flush/ack-watchdog TIMEOUT: with a short [flush_timeout_ms], [flush]
-    must return [Error (Timeout _)] rather than hanging forever.
+(** Mock Zerobus [EphemeralStream] server that accepts the stream but NEVER acks
+    — it replies to [CreateStream] with a stream_id, then silently drops every
+    [IngestRecord] (no [durability_ack_up_to_offset] ever sent). Used to prove
+    the driver's flush/ack-watchdog TIMEOUT: with a short [flush_timeout_ms],
+    [flush] must return [Error (Timeout _)] rather than hanging forever.
 
     Separate-process, cleartext h2c on loopback (the proven topology). *)
 
@@ -68,7 +68,8 @@ let () =
      in
      let handler =
        H2_lwt_unix.Server.create_connection_handler ?config:None
-         ~request_handler:(fun _ reqd -> Grpc_lwt.Server.handle_request server reqd)
+         ~request_handler:(fun _ reqd ->
+           Grpc_lwt.Server.handle_request server reqd)
          ~error_handler:(fun _ ?request:_ _ _ -> ())
      in
      Printf.printf "READY %d\n%!" actual_port;

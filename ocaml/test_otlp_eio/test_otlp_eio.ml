@@ -1,11 +1,11 @@
-(** Eio OTLP acceptance: {!Zerobus_otlp_eio} (the OTLP logs/metrics exporter, Eio
-    runtime) against a mock OTLP collector (separate process, cleartext h2c) + an
-    in-process cohttp-eio OIDC token endpoint.
+(** Eio OTLP acceptance: {!Zerobus_otlp_eio} (the OTLP logs/metrics exporter,
+    Eio runtime) against a mock OTLP collector (separate process, cleartext h2c)
+    \+ an in-process cohttp-eio OIDC token endpoint.
 
     The Eio counterpart of test_otlp/test_otlp_lwt.ml — same coverage, direct
     style. Proves the full otlp/grpc flow end-to-end without a live workspace:
-    - the exporter mints a table-scoped token (client-credentials grant) and opens
-      a TLS-off h2c connection to the collector via the Eio H2 client;
+    - the exporter mints a table-scoped token (client-credentials grant) and
+      opens a TLS-off h2c connection to the collector via the Eio H2 client;
     - a batch of OTel logs is framed as a valid ExportLogsServiceRequest, the
       collector DECODES it (proving the wire types + framing), and returns OK;
     - likewise for metrics via MetricsService/Export;
@@ -46,8 +46,7 @@ let start_token_server ~sw ~env : string =
     else Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"" ()
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Cohttp_eio.Server.run socket
-        (Cohttp_eio.Server.make ~callback:handler ())
+      Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
         ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
 
@@ -122,7 +121,8 @@ let run ~env ~sw : outcome =
             Otlp.export_metrics ~env ~sw client (sample_metrics ())
           in
           let r_partial =
-            Otlp.export_logs ~env ~sw client (sample_logs ~schema_url:"REJECT1" ())
+            Otlp.export_logs ~env ~sw client
+              (sample_logs ~schema_url:"REJECT1" ())
           in
           let r_empty = Otlp.export_logs ~env ~sw client [] in
           let ok = function Ok _ -> true | Error _ -> false in
@@ -136,26 +136,27 @@ let run ~env ~sw : outcome =
             metrics_ok = ok r_metrics;
             metrics_rejected = rej r_metrics;
             partial_rejected = rej r_partial;
-            empty_ok = (r_empty = Ok { rejected = 0L; error_message = "" });
+            empty_ok = r_empty = Ok { rejected = 0L; error_message = "" };
             mints = !token_mints;
           })
 
 let result =
   lazy
-    (Eio_main.run @@ fun env ->
-     Eio.Switch.run @@ fun sw ->
-     let o = run ~env ~sw in
-     Printf.eprintf
-       "ZEROBUS OCAML — EIO OTLP TEST -- evidence\n\
-        ocaml_version : %s\n\
-        logs_export   : ok=%b rejected=%Ld\n\
-        metrics_export: ok=%b rejected=%Ld\n\
-        partial_success (REJECT1): rejected=%Ld (expect 1)\n\
-        empty_is_noop : %b\n\
-        token_mints   : %d (expect 1 — cached across exports)\n%!"
-       Sys.ocaml_version o.logs_ok o.logs_rejected o.metrics_ok
-       o.metrics_rejected o.partial_rejected o.empty_ok o.mints;
-     o)
+    ( Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let o = run ~env ~sw in
+      Printf.eprintf
+        "ZEROBUS OCAML — EIO OTLP TEST -- evidence\n\
+         ocaml_version : %s\n\
+         logs_export   : ok=%b rejected=%Ld\n\
+         metrics_export: ok=%b rejected=%Ld\n\
+         partial_success (REJECT1): rejected=%Ld (expect 1)\n\
+         empty_is_noop : %b\n\
+         token_mints   : %d (expect 1 — cached across exports)\n\
+         %!"
+        Sys.ocaml_version o.logs_ok o.logs_rejected o.metrics_ok
+        o.metrics_rejected o.partial_rejected o.empty_ok o.mints;
+      o )
 
 let () =
   Alcotest.run "otlp-eio"

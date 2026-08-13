@@ -1,10 +1,12 @@
-(** Phase 6 acceptance: the driver's recovery (§12.3) end to end over Lwt, against
-    a mock server that drops the first stream mid-way with a retryable status. The
-    driver must reconnect, replay the un-acked tail in order, and ultimately have
-    every record durably acked — recovery invisible above [ingest]/[flush].
+(** Phase 6 acceptance: the driver's recovery (§12.3) end to end over Lwt,
+    against a mock server that drops the first stream mid-way with a retryable
+    status. The driver must reconnect, replay the un-acked tail in order, and
+    ultimately have every record durably acked — recovery invisible above
+    [ingest]/[flush].
 
-    Because [ingest] never blocks and the drop happens after 50 acks, the flush at
-    the end is what forces the driver through the reconnect+replay before returning. *)
+    Because [ingest] never blocks and the drop happens after 50 acks, the flush
+    at the end is what forces the driver through the reconnect+replay before
+    returning. *)
 
 module Z = Zerobus.Driver
 module Opt = Zerobus_core.Options
@@ -21,7 +23,9 @@ let server_exe () =
 let with_server (f : unit -> 'a Lwt.t) : 'a Lwt.t =
   let exe = server_exe () in
   let stdout_r, stdout_w = Unix.pipe () in
-  let pid = Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr in
+  let pid =
+    Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr
+  in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
   (try
@@ -42,10 +46,7 @@ let run () : result Lwt.t =
       let acks_seen = ref 0 in
       (* count distinct watermark advances via the ack callback *)
       let ack_callback =
-        {
-          Opt.on_ack = (fun _ -> incr acks_seen);
-          on_error = (fun _ _ -> ());
-        }
+        { Opt.on_ack = (fun _ -> incr acks_seen); on_error = (fun _ _ -> ()) }
       in
       let options =
         {
@@ -64,33 +65,54 @@ let run () : result Lwt.t =
           ~options ~table scope
       in
       match stream_r with
-      | Error e -> Lwt.return { flushed_ok = false; acks_seen = 0; err = Some (Zerobus_core.Error.to_string e) }
-      | Ok stream ->
+      | Error e ->
+          Lwt.return
+            {
+              flushed_ok = false;
+              acks_seen = 0;
+              err = Some (Zerobus_core.Error.to_string e);
+            }
+      | Ok stream -> (
           let rec loop i =
             if i >= n_records then Lwt.return (Ok ())
             else
-              let* r = Z.ingest stream (Bytes.of_string (Printf.sprintf {|{"id":%d}|} i)) in
+              let* r =
+                Z.ingest stream
+                  (Bytes.of_string (Printf.sprintf {|{"id":%d}|} i))
+              in
               match r with Ok _ -> loop (i + 1) | Error _ as e -> Lwt.return e
           in
           let* ing = loop 0 in
-          (match ing with
-           | Error e -> Lwt.return { flushed_ok = false; acks_seen = !acks_seen; err = Some (Zerobus_core.Error.to_string e) }
-           | Ok () ->
-               let* flush_r = Z.flush stream in
-               let* _ = Z.close stream in
-               Lwt.return
-                 {
-                   flushed_ok = (match flush_r with Ok () -> true | Error _ -> false);
-                   acks_seen = !acks_seen;
-                   err = (match flush_r with Error e -> Some (Zerobus_core.Error.to_string e) | Ok () -> None);
-                 }))
+          match ing with
+          | Error e ->
+              Lwt.return
+                {
+                  flushed_ok = false;
+                  acks_seen = !acks_seen;
+                  err = Some (Zerobus_core.Error.to_string e);
+                }
+          | Ok () ->
+              let* flush_r = Z.flush stream in
+              let* _ = Z.close stream in
+              Lwt.return
+                {
+                  flushed_ok =
+                    (match flush_r with Ok () -> true | Error _ -> false);
+                  acks_seen = !acks_seen;
+                  err =
+                    (match flush_r with
+                    | Error e -> Some (Zerobus_core.Error.to_string e)
+                    | Ok () -> None);
+                }))
 
 (* Bound the whole thing so a recovery bug reports instead of hanging. *)
 let run_bounded () =
   Lwt.pick
-    [ run ();
+    [
+      run ();
       (let* () = Lwt_unix.sleep 30.0 in
-       Lwt.return { flushed_ok = false; acks_seen = -1; err = Some "TIMEOUT" }) ]
+       Lwt.return { flushed_ok = false; acks_seen = -1; err = Some "TIMEOUT" });
+    ]
 
 let result = lazy (Lwt_main.run (with_server run_bounded))
 
@@ -105,7 +127,8 @@ let () =
           Alcotest.test_case "flush succeeded after recovery" `Slow (fun () ->
               let r = Lazy.force result in
               Alcotest.(check bool) "flushed" true r.flushed_ok);
-          Alcotest.test_case "acks observed (watermark advanced)" `Slow (fun () ->
+          Alcotest.test_case "acks observed (watermark advanced)" `Slow
+            (fun () ->
               let r = Lazy.force result in
               (* at least one ack watermark fired via the callback, and no TIMEOUT
                  sentinel (-1) *)

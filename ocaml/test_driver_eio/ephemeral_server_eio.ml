@@ -1,13 +1,14 @@
 (** Mock Zerobus [EphemeralStream] server for the Eio driver test — a standalone
-    process (the proven separate-process topology, required by the grpc-eio 0.2.0
-    client-flush finding), cleartext h2c on loopback.
+    process (the proven separate-process topology, required by the grpc-eio
+    0.2.0 client-flush finding), cleartext h2c on loopback.
 
-    Identical wire behaviour to [ephemeral_server.ml] (the Lwt mock), just on the
-    Eio grpc/h2 stack so it links on the OCaml-5 [zbeio] switch (which has no
-    grpc-lwt): speaks the REAL vendored proto — on [CreateIngestStreamRequest] it
-    replies with a [CreateIngestStreamResponse] (a stream_id); for each
-    [IngestRecordRequest] it advances a durability watermark and replies with an
-    [IngestRecordResponse] carrying [durability_ack_up_to_offset].
+    Identical wire behaviour to [ephemeral_server.ml] (the Lwt mock), just on
+    the Eio grpc/h2 stack so it links on the OCaml-5 [zbeio] switch (which has
+    no grpc-lwt): speaks the REAL vendored proto — on
+    [CreateIngestStreamRequest] it replies with a [CreateIngestStreamResponse]
+    (a stream_id); for each [IngestRecordRequest] it advances a durability
+    watermark and replies with an [IngestRecordResponse] carrying
+    [durability_ack_up_to_offset].
 
     This is the backend the runtime-agnostic driver ({!Zerobus_core.Make}) runs
     against on Eio, exercising create/ingest/flush end to end without a live
@@ -23,7 +24,8 @@ let encode_resp (r : Z.ephemeral_stream_response) : string =
   Z.encode_pb_ephemeral_stream_response r e;
   Pbrt.Encoder.to_string e
 
-let handle (requests : string Seq.t) (respond : string -> unit) : Grpc.Status.t =
+let handle (requests : string Seq.t) (respond : string -> unit) : Grpc.Status.t
+    =
   let watermark = ref (-1L) in
   Seq.iter
     (fun raw ->

@@ -21,6 +21,11 @@
   pbrt
   lwt
   lwt.unix
+  ; the custom-headers auth case mints a bearer itself (cohttp POST to /token)
+  cohttp-lwt-unix
+  uri
+  yojson
+  base64
   alcotest))
 
 ; Eio — OCaml >= 5.0 only.

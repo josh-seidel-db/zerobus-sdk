@@ -20,9 +20,7 @@ let to_string = function
 (* gRPC status codes that the service/transport may surface transiently.
    14 = UNAVAILABLE, 4 = DEADLINE_EXCEEDED, 8 = RESOURCE_EXHAUSTED,
    10 = ABORTED. These mirror the Rust core's retryable classification. *)
-let retryable_status_code = function
-  | 14 | 4 | 8 | 10 -> true
-  | _ -> false
+let retryable_status_code = function 14 | 4 | 8 | 10 -> true | _ -> false
 
 let is_retryable = function
   | Transport_error _ | Timeout _ -> true

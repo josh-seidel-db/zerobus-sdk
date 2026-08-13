@@ -20,13 +20,21 @@
     this REST path serializes each batch behind a full request/response and
     cannot pipeline. *)
 
+type t
 (** A REST client. Holds workspace credentials, the derived REST endpoint, and a
     per-table OAuth token cache. Opaque; construct with {!create}. *)
-type t
 
-(** Errors are the shared SDK taxonomy. *)
 type error = Zerobus_core.Error.t
+(** Errors are the shared SDK taxonomy. *)
 
+val create :
+  ?application_name:string ->
+  endpoint:string ->
+  workspace_url:string ->
+  client_id:string ->
+  client_secret:string ->
+  unit ->
+  (t, error) result Lwt.t
 (** Construct a REST client from workspace credentials.
 
     Parameters:
@@ -44,15 +52,9 @@ type error = Zerobus_core.Error.t
 
     Returns [Auth_error] or [Transport_error] if the workspace URL cannot be
     parsed. *)
-val create :
-  ?application_name:string ->
-  endpoint:string ->
-  workspace_url:string ->
-  client_id:string ->
-  client_secret:string ->
-  unit ->
-  (t, error) result Lwt.t
 
+val insert :
+  t -> table:string -> Yojson.Safe.t list -> (unit, error) result Lwt.t
 (** Insert a batch of JSON records into [table] (catalog.schema.table).
 
     Mints (or reuses a cached) table-scoped token, then [POST]s the records as a
@@ -61,7 +63,5 @@ val create :
     An empty [records] list is a no-op ([Ok ()]) — no request is sent.
 
     Returns [Auth_error] on token-mint failure or a non-2xx from the token
-    endpoint, [Server_status] on a non-2xx from the insert endpoint (carrying the
-    HTTP code), or [Transport_error] on a network/connection failure. *)
-val insert :
-  t -> table:string -> Yojson.Safe.t list -> (unit, error) result Lwt.t
+    endpoint, [Server_status] on a non-2xx from the insert endpoint (carrying
+    the HTTP code), or [Transport_error] on a network/connection failure. *)

@@ -2,10 +2,10 @@
 
     The Eio (direct-style) counterpart of {!Zerobus_otlp} (the Lwt reference).
     Same two unary Export RPCs over the same TLS 1.3 + ALPN-h2 transport — but
-    reusing the {b Eio} H2 client ([Zerobus_eio.Io_eio_for_test.H2_client]) and a
-    [cohttp-eio] token mint. The OTLP wire types come from the shared
-    [Zerobus_otlp_proto] library (vendored OpenTelemetry protos), identical to the
-    Lwt exporter.
+    reusing the {b Eio} H2 client ([Zerobus_eio.Io_eio_for_test.H2_client]) and
+    a [cohttp-eio] token mint. The OTLP wire types come from the shared
+    [Zerobus_otlp_proto] library (vendored OpenTelemetry protos), identical to
+    the Lwt exporter.
 
     See {!Zerobus_otlp_eio} (the .mli) for the contract. *)
 
@@ -28,7 +28,7 @@ type t = {
   endpoint_port : int;
   table : string;
   tls : bool;
-  application_name : string option [@ocaml.warning "-69"];
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   mutable token_cache : (string * float) option;
@@ -114,7 +114,8 @@ let mint_token ~env ~sw t : (string, error) result =
                 let uri = Uri.of_string (t.workspace_url ^ "/oidc/v1/token") in
                 let resp, rbody =
                   Cohttp_eio.Client.post ~sw httpc ~headers
-                    ~body:(Cohttp_eio.Body.of_string body) uri
+                    ~body:(Cohttp_eio.Body.of_string body)
+                    uri
                 in
                 let resp_str =
                   Eio.Buf_read.(parse_exn take_all) rbody ~max_size:max_int
@@ -145,7 +146,8 @@ let mint_token ~env ~sw t : (string, error) result =
                           t.token_cache <- Some (tok, now +. expires_in);
                           Ok tok
                       | None ->
-                          Error (Error.Auth_error "no access_token in response"))
+                          Error (Error.Auth_error "no access_token in response")
+                      )
                   | _ -> Error (Error.Auth_error "malformed token response")
               with exn ->
                 Error
@@ -176,12 +178,12 @@ let unary_export ~env ~sw t ~service ~rpc ~(encode : unit -> string)
               ~headers ()
           with
           | Error e -> Error e
-          | Ok conn ->
+          | Ok conn -> (
               let finish result =
                 H2.shutdown conn;
                 result
               in
-              (match H2.start_bidi conn ~service ~rpc () with
+              match H2.start_bidi conn ~service ~rpc () with
               | Error e -> finish (Error e)
               | Ok call -> (
                   match H2.send call (encode ()) with
@@ -211,8 +213,8 @@ let unary_export ~env ~sw t ~service ~rpc ~(encode : unit -> string)
                                   | None ->
                                       finish
                                         (Ok
-                                           { rejected = 0L; error_message = "" }))
-                              ))))))
+                                           { rejected = 0L; error_message = "" })
+                                  )))))))
 
 let export_logs ~env ~sw t (rls : OLogs.resource_logs list) :
     (export_result, error) result =
@@ -238,8 +240,8 @@ let export_logs ~env ~sw t (rls : OLogs.resource_logs list) :
         | None -> { rejected = 0L; error_message = "" }
       in
       unary_export ~env ~sw t
-        ~service:"opentelemetry.proto.collector.logs.v1.LogsService" ~rpc:"Export"
-        ~encode ~decode
+        ~service:"opentelemetry.proto.collector.logs.v1.LogsService"
+        ~rpc:"Export" ~encode ~decode
 
 let export_metrics ~env ~sw t (rms : OMetrics.resource_metrics list) :
     (export_result, error) result =

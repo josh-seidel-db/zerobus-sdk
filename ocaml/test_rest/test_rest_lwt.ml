@@ -1,13 +1,14 @@
 (** Phase 7c acceptance: {!Zerobus_rest} (the stateless REST insert helper)
     against an in-process cohttp mock that plays BOTH endpoints:
-      - [POST /oidc/v1/token]                              -> the OAuth grant
-      - [POST /zerobus/v1/tables/<table>/insert]           -> the batch insert
+    - [POST /oidc/v1/token] -> the OAuth grant
+    - [POST /zerobus/v1/tables/<table>/insert] -> the batch insert
 
     Proves the full REST flow end-to-end without a live workspace:
-    - the client-credentials grant is issued (HTTP Basic client auth, form body),
-      and the returned bearer token is attached to the insert request;
+    - the client-credentials grant is issued (HTTP Basic client auth, form
+      body), and the returned bearer token is attached to the insert request;
     - records are POSTed as a single JSON array to the right table path;
-    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the code;
+    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the
+      code;
     - an empty batch sends nothing ([Ok ()]);
     - the token is cached (a second insert to the same table mints only once).
 
@@ -45,8 +46,7 @@ let handler _conn (req : Cohttp.Request.t) (body : Cohttp_lwt.Body.t) =
     Cohttp_lwt_unix.Server.respond_string ~status:`OK ~body:json ()
   end
   else if
-    String.length path > 12
-    && String.sub path 0 13 = "/zerobus/v1/t"
+    String.length path > 12 && String.sub path 0 13 = "/zerobus/v1/t"
     (* /zerobus/v1/tables/<table>/insert *)
   then begin
     (match Cohttp.Header.get headers "authorization" with
@@ -135,11 +135,12 @@ let run () : outcome Lwt.t =
           mints = !token_mints;
           bearer = !saw_bearer;
           basic = !saw_basic;
-          first_body = (match List.rev !insert_bodies with b :: _ -> b | [] -> "");
+          first_body =
+            (match List.rev !insert_bodies with b :: _ -> b | [] -> "");
           n_inserts = List.length !insert_bodies;
-          empty_ok = (r_empty = Ok ());
+          empty_ok = r_empty = Ok ();
           err_code;
-          path_ok = (path_ok && r1 = Ok () && r2 = Ok ());
+          path_ok = path_ok && r1 = Ok () && r2 = Ok ();
         }
 
 let result =
@@ -155,7 +156,8 @@ let result =
            first_body    : %s\n\
            empty_is_noop : %b\n\
            error_code    : %s\n\
-           paths_correct : %b\n%!"
+           paths_correct : %b\n\
+           %!"
           Sys.ocaml_version o.mints o.basic o.bearer o.n_inserts o.first_body
           o.empty_ok
           (match o.err_code with Some c -> string_of_int c | None -> "none")
@@ -178,8 +180,8 @@ let () =
               Alcotest.(check int) "mints" 1 o.mints);
           Alcotest.test_case "records sent as one JSON array" `Quick (fun () ->
               let o = Lazy.force result in
-              Alcotest.(check bool) "json array"
-                true
+              Alcotest.(check bool)
+                "json array" true
                 (String.length o.first_body > 0
                 && o.first_body.[0] = '['
                 && o.first_body.[String.length o.first_body - 1] = ']'));

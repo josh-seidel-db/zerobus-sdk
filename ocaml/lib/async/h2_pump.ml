@@ -1,10 +1,10 @@
 (** Drive the runtime-agnostic {!H2.Client_connection} core over an Async
     [Reader.t] / [Writer.t] duplex — the same job gluten does over a socket, but
-    without gluten-async (whose TLS backend is a build-time [select] that ships a
-    dummy on our switches and doesn't compile against current tls). This lets the
-    Async transport run h2 over BOTH a plain TCP duplex (cleartext h2c, for mocks)
-    and a [tls-async] duplex (live TLS + ALPN h2) — see {!Tls_connect}. Proven live
-    against the real Zerobus endpoint (spike-async-tls/). *)
+    without gluten-async (whose TLS backend is a build-time [select] that ships
+    a dummy on our switches and doesn't compile against current tls). This lets
+    the Async transport run h2 over BOTH a plain TCP duplex (cleartext h2c, for
+    mocks) and a [tls-async] duplex (live TLS + ALPN h2) — see {!Tls_connect}.
+    Proven live against the real Zerobus endpoint (spike-async-tls/). *)
 
 open! Core
 open! Async
@@ -27,7 +27,8 @@ let rec run_writer (conn : H2.Client_connection.t) (w : Writer.t) : unit =
 
 (* Pump the READ state machine: feed each chunk the Reader delivers into h2's
    [read]; on EOF tell h2 via [read_eof]. Runs for the connection's life. *)
-let run_reader (conn : H2.Client_connection.t) (r : Reader.t) : unit Deferred.t =
+let run_reader (conn : H2.Client_connection.t) (r : Reader.t) : unit Deferred.t
+    =
   let%map _reason =
     Reader.read_one_chunk_at_a_time r ~handle_chunk:(fun buf ~pos ~len ->
         let consumed =

@@ -1,14 +1,15 @@
-(** Cross-implementation OTLP acceptance (Lwt): our {!Zerobus_otlp} exporter (which
-    encodes with our vendored [Zerobus_otlp_proto]) against a mock collector that
-    decodes with the {b canonical} upstream [opentelemetry.proto] types
-    (otel_collector_lwt). This proves genuine OTLP wire-compatibility — a
+(** Cross-implementation OTLP acceptance (Lwt): our {!Zerobus_otlp} exporter
+    (which encodes with our vendored [Zerobus_otlp_proto]) against a mock
+    collector that decodes with the {b canonical} upstream [opentelemetry.proto]
+    types (otel_collector_lwt). This proves genuine OTLP wire-compatibility — a
     symmetric-codec bug that [test_otlp] (both sides our protos) would miss is
-    caught here, because the encoder and decoder are independent implementations.
+    caught here, because the encoder and decoder are independent
+    implementations.
 
     Flow: mint token (in-process cohttp OIDC mock) -> h2c to the collector ->
-    LogsService/Export + MetricsService/Export -> the collector CANONICAL-decodes
-    and echoes counts to a log file -> asserts on our decoded response + the
-    collector's decode log.
+    LogsService/Export + MetricsService/Export -> the collector
+    CANONICAL-decodes and echoes counts to a log file -> asserts on our decoded
+    response + the collector's decode log.
 
     Cleartext h2c, loopback, ephemeral ports. Runs on fl414. *)
 
@@ -27,7 +28,8 @@ let token_handler _conn (req : Cohttp.Request.t) (_body : Cohttp_lwt.Body.t) =
   if path = "/oidc/v1/token" then begin
     incr token_mints;
     Cohttp_lwt_unix.Server.respond_string ~status:`OK
-      ~body:{|{"access_token":"tok-otel-1","token_type":"Bearer","expires_in":3600}|}
+      ~body:
+        {|{"access_token":"tok-otel-1","token_type":"Bearer","expires_in":3600}|}
       ()
   end
   else Cohttp_lwt_unix.Server.respond_string ~status:`Not_found ~body:"" ()
@@ -62,7 +64,8 @@ let with_collector ~log_path (f : int -> 'a Lwt.t) : 'a Lwt.t =
   in
   let stdout_r, stdout_w = Unix.pipe () in
   let pid =
-    Unix.create_process_env exe [| exe; "0" |] env Unix.stdin stdout_w Unix.stderr
+    Unix.create_process_env exe [| exe; "0" |] env Unix.stdin stdout_w
+      Unix.stderr
   in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
@@ -117,7 +120,9 @@ type outcome = {
   collector_saw_info : bool;
 }
 
-let read_file p = try In_channel.with_open_bin p In_channel.input_all with _ -> ""
+let read_file p =
+  try In_channel.with_open_bin p In_channel.input_all with _ -> ""
+
 let contains hay needle =
   let nl = String.length needle and hl = String.length hay in
   let rec go i =
@@ -168,9 +173,11 @@ let result =
     (Lwt_main.run
        (let* o = run () in
         Printf.eprintf
-          "ZEROBUS OCAML — OTLP CROSS-IMPL TEST (Lwt, canonical opentelemetry.proto)\n\
+          "ZEROBUS OCAML — OTLP CROSS-IMPL TEST (Lwt, canonical \
+           opentelemetry.proto)\n\
            logs_export ok=%b rejected=%Ld ; metrics ok=%b ; partial rejected=%Ld\n\
-           token_mints=%d ; collector canonical-decoded 2 logs=%b ; saw INFO=%b\n%!"
+           token_mints=%d ; collector canonical-decoded 2 logs=%b ; saw INFO=%b\n\
+           %!"
           o.logs_ok o.logs_rejected o.metrics_ok o.partial_rejected o.mints
           o.collector_saw_2_logs o.collector_saw_info;
         Lwt.return o))
@@ -188,16 +195,17 @@ let () =
               Alcotest.(check bool) "ok" true (Lazy.force result).metrics_ok);
           Alcotest.test_case "partial success surfaced (1 rejected)" `Slow
             (fun () ->
-              Alcotest.(check int64) "rej" 1L (Lazy.force result).partial_rejected);
+              Alcotest.(check int64)
+                "rej" 1L (Lazy.force result).partial_rejected);
           Alcotest.test_case "token cached (mints once)" `Slow (fun () ->
               Alcotest.(check int) "mints" 1 (Lazy.force result).mints);
           Alcotest.test_case "CANONICAL decoder read 2 log records" `Slow
             (fun () ->
-              Alcotest.(check bool) "2 logs" true
-                (Lazy.force result).collector_saw_2_logs);
+              Alcotest.(check bool)
+                "2 logs" true (Lazy.force result).collector_saw_2_logs);
           Alcotest.test_case "CANONICAL decoder read severity INFO" `Slow
             (fun () ->
-              Alcotest.(check bool) "sev" true
-                (Lazy.force result).collector_saw_info);
+              Alcotest.(check bool)
+                "sev" true (Lazy.force result).collector_saw_info);
         ] );
     ]

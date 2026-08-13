@@ -1,11 +1,12 @@
 (** Self-signed TLS h2 mock Zerobus [EphemeralStream] server for the Eio
     live-TLS test — a standalone process. Identical proto behaviour to
     [ephemeral_server_eio.ml], but each accepted socket is wrapped in a
-    server-side TLS 1.3 handshake (ALPN h2) using a freshly generated self-signed
-    certificate. On startup it prints [READY <port> <cert-sha256-b64>] so the
-    client can pin that exact cert (the client can't use the system trust store
-    for a self-signed cert). This is what actually exercises the Eio transport's
-    real TLS+ALPN path (the cleartext mocks never do). *)
+    server-side TLS 1.3 handshake (ALPN h2) using a freshly generated
+    self-signed certificate. On startup it prints
+    [READY <port> <cert-sha256-b64>] so the client can pin that exact cert (the
+    client can't use the system trust store for a self-signed cert). This is
+    what actually exercises the Eio transport's real TLS+ALPN path (the
+    cleartext mocks never do). *)
 
 module Z = Zerobus_proto.Zerobus_service
 
@@ -17,7 +18,8 @@ let encode_resp (r : Z.ephemeral_stream_response) : string =
   Z.encode_pb_ephemeral_stream_response r e;
   Pbrt.Encoder.to_string e
 
-let handle (requests : string Seq.t) (respond : string -> unit) : Grpc.Status.t =
+let handle (requests : string Seq.t) (respond : string -> unit) : Grpc.Status.t
+    =
   let watermark = ref (-1L) in
   Seq.iter
     (fun raw ->
@@ -54,7 +56,10 @@ let grpc_server () =
 let make_self_signed () : Tls.Config.own_cert * string =
   let key = X509.Private_key.generate `RSA in
   let dn =
-    [ X509.Distinguished_name.(Relative_distinguished_name.singleton (CN "localhost")) ]
+    [
+      X509.Distinguished_name.(
+        Relative_distinguished_name.singleton (CN "localhost"));
+    ]
   in
   let csr =
     match X509.Signing_request.create dn key with
@@ -83,9 +88,7 @@ let () =
   Mirage_crypto_rng_unix.use_default ();
   let certificates, fp_b64 = make_self_signed () in
   let tls_cfg =
-    match
-      Tls.Config.server ~certificates ~alpn_protocols:[ "h2" ] ()
-    with
+    match Tls.Config.server ~certificates ~alpn_protocols:[ "h2" ] () with
     | Ok c -> c
     | Error (`Msg m) -> failwith ("tls server cfg: " ^ m)
   in

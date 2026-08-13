@@ -1,8 +1,8 @@
 (** Real TLS connect for the Async transport — used when [tls-async] is present
-    (dune [select] picks this over [tls_connect.dummy.ml]). Establishes TLS 1.3 +
-    ALPN [h2] with system trust anchors + peer-name verification (mirrors the Lwt
-    reference), returning a cleartext Async [Reader]/[Writer] duplex the h2 core
-    pump ({!H2_pump}) drives. No gluten-async / h2-async TLS involved. *)
+    (dune [select] picks this over [tls_connect.dummy.ml]). Establishes TLS 1.3
+    \+ ALPN [h2] with system trust anchors + peer-name verification (mirrors the
+    Lwt reference), returning a cleartext Async [Reader]/[Writer] duplex the h2
+    core pump ({!H2_pump}) drives. No gluten-async / h2-async TLS involved. *)
 
 open! Core
 open! Async
@@ -21,7 +21,8 @@ let pinned_cert_fp_sha256_b64 : string option ref = ref None
 
 (* Returns (reader, writer, shutdown) on success. [shutdown] closes the writer. *)
 let connect ~host ~port :
-    (Reader.t * Writer.t * (unit -> unit Deferred.t), string) Deferred.Result.t =
+    (Reader.t * Writer.t * (unit -> unit Deferred.t), string) Deferred.Result.t
+    =
   let authenticator =
     match !pinned_cert_fp_sha256_b64 with
     | Some fp -> (
@@ -39,7 +40,8 @@ let connect ~host ~port :
   in
   let peer_name =
     match Domain_name.of_string host with
-    | Ok d -> ( match Domain_name.host d with Ok h -> Some h | Error _ -> None)
+    | Ok d -> (
+        match Domain_name.host d with Ok h -> Some h | Error _ -> None)
     | Error _ -> None
   in
   let cfg =

@@ -3,19 +3,21 @@
     A {!Stream.PROTOCOL} instance for [record_type = Arrow]. It matches the wire
     format the Zerobus service expects (as the Rust SDK produces):
 
-    - the SCHEMA is sent ONCE, as the first FlightData's [data_header] (the schema
-      IPC message metadata FlatBuffer). We carry those schema bytes in
+    - the SCHEMA is sent ONCE, as the first FlightData's [data_header] (the
+      schema IPC message metadata FlatBuffer). We carry those schema bytes in
       [table_properties.descriptor] (opaque to core), so core needs no libarrow;
-      the [zerobus-arrow] codec produces them via [Zerobus_arrow.schema_message].
+      the [zerobus-arrow] codec produces them via
+      [Zerobus_arrow.schema_message].
     - each record is a PACKED blob [ [4-byte BE header_len] header body ] from
       [Zerobus_arrow.encode], where [header] is the record-batch IPC message
-      metadata FlatBuffer and [body] is the raw 8-byte-padded buffers. We split it
-      into [FlightData.data_header] / [data_body] here — mechanically, no Arrow
-      knowledge — and put the Zerobus offset in [app_metadata] as JSON
+      metadata FlatBuffer and [body] is the raw 8-byte-padded buffers. We split
+      it into [FlightData.data_header] / [data_body] here — mechanically, no
+      Arrow knowledge — and put the Zerobus offset in [app_metadata] as JSON
       [{"offset_id":N}] (the Rust SDK's FlightBatchMetadata).
 
-    The durable watermark comes back in [PutResult.app_metadata]. This module needs
-    NO libarrow — it only moves already-encoded bytes through the Flight protobuf. *)
+    The durable watermark comes back in [PutResult.app_metadata]. This module
+    needs NO libarrow — it only moves already-encoded bytes through the Flight
+    protobuf. *)
 
 module F = Zerobus_proto.Flight
 
@@ -43,7 +45,8 @@ let create_frame ~(table : Options.table_properties)
     (F.make_flight_data
        ~flight_descriptor:
          (F.make_flight_descriptor ~type_:F.Path
-            ~path:[ table.Options.table_name ] ~cmd:Bytes.empty ())
+            ~path:[ table.Options.table_name ]
+            ~cmd:Bytes.empty ())
        ~data_header:schema_header ~app_metadata:Bytes.empty
        ~data_body:Bytes.empty ())
 
@@ -69,8 +72,8 @@ let split_packed (b : bytes) : bytes * bytes =
 (* One record batch: split the packed IPC (header -> data_header, body ->
    data_body); the Zerobus offset rides in app_metadata as JSON {"offset_id":N}
    (rust/sdk FlightBatchMetadata). *)
-let record_frame ~(record_type : Options.record_type) ~offset (b : bytes) : string
-    =
+let record_frame ~(record_type : Options.record_type) ~offset (b : bytes) :
+    string =
   ignore record_type;
   let header, body = split_packed b in
   encode_fd
@@ -102,7 +105,8 @@ let json_int_field (json : string) (key : string) : int64 option =
       let is_num c = (c >= '0' && c <= '9') || c = '-' in
       let rec take j = if j < n && is_num json.[j] then take (j + 1) else j in
       let stop = take start in
-      if stop > start then Int64.of_string_opt (String.sub json start (stop - start))
+      if stop > start then
+        Int64.of_string_opt (String.sub json start (stop - start))
       else None
 
 (* Ack: PutResult.app_metadata carries the durable watermark. The live Zerobus

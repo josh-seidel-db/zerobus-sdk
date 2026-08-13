@@ -2,16 +2,17 @@
 
     The optional [zerobus-arrow] package: the ONLY part of the SDK that links
     libarrow. It produces the Arrow-over-Flight encoding the Zerobus service
-    expects (matching the Rust SDK): a one-time SCHEMA message, then per-record a
-    PACKED [header_len][header][body] blob where [header] is the record-batch IPC
-    message metadata FlatBuffer and [body] is the raw, 8-byte-padded buffers. The
-    core Flight protocol ({!Zerobus_core.Flight_protocol}) splits that blob into
-    [FlightData.data_header] / [FlightData.data_body] mechanically, without any
-    libarrow dependency itself.
+    expects (matching the Rust SDK): a one-time SCHEMA message, then per-record
+    a PACKED [header_len][header][body] blob where [header] is the record-batch
+    IPC message metadata FlatBuffer and [body] is the raw, 8-byte-padded
+    buffers. The core Flight protocol ({!Zerobus_core.Flight_protocol}) splits
+    that blob into [FlightData.data_header] / [FlightData.data_body]
+    mechanically, without any libarrow dependency itself.
 
     A caller who wants [record_type = Arrow] links this package, calls
     {!schema_message} once (the driver sends it as the first FlightData) and
-    {!encode} per record, handing the bytes to [ingest]. Results-over-exceptions. *)
+    {!encode} per record, handing the bytes to [ingest].
+    Results-over-exceptions. *)
 
 (* --- external C stubs (see zerobus_arrow_stubs.cc) --- *)
 
@@ -21,8 +22,7 @@ external c_schema_message : unit -> (bytes, string) result
   = "zbi_ocaml_schema_message"
 
 (* Encode one record batch to the PACKED [hdrlen][header][body] blob. *)
-external c_encode_batch :
-  int array -> string array -> (bytes, string) result
+external c_encode_batch : int array -> string array -> (bytes, string) result
   = "zbi_ocaml_encode_batch"
 
 (* Decode: (schema_message_metadata, packed_blob) -> (ids, names) or error. *)

@@ -1,17 +1,16 @@
 (** Example 2 — async ack notification via a callback (Lwt, JSON).
 
-    For continuous / unbounded streams you don't want to block on [flush] at all.
-    Register an [ack_callback]: [on_ack] fires (from the ack-reader) as the server
-    confirms each offset durable, [on_error] if a record ultimately fails. You
-    still [ingest] in a tight loop and never wait inline — the callback is how you
-    learn about durability, out of band.
+    For continuous / unbounded streams you don't want to block on [flush] at
+    all. Register an [ack_callback]: [on_ack] fires (from the ack-reader) as the
+    server confirms each offset durable, [on_error] if a record ultimately
+    fails. You still [ingest] in a tight loop and never wait inline — the
+    callback is how you learn about durability, out of band.
 
     This is the right shape for a long-lived producer: queue continuously, react
     to acks asynchronously, and [flush] only periodically (e.g. every N records)
     or at shutdown — never per record. *)
 
 let ( let* ) = Lwt.bind
-
 let env k = try Sys.getenv k with Not_found -> failwith ("set env " ^ k)
 
 let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
@@ -27,12 +26,12 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
       let acked = ref 0 in
       let ack_callback =
         {
-          Zerobus_core.Options.on_ack =
-            (fun _off -> incr acked);
+          Zerobus_core.Options.on_ack = (fun _off -> incr acked);
           on_error =
             (fun off msg ->
               Printf.eprintf "ack error at offset %Ld: %s\n%!"
-                (Zerobus_core.Options.int64_of_offset off) msg);
+                (Zerobus_core.Options.int64_of_offset off)
+                msg);
         }
       in
       let table = { Zerobus_core.Options.table_name; descriptor = None } in

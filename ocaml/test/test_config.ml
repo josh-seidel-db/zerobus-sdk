@@ -52,10 +52,11 @@ let () =
           wsid_ok "azure-adb-no-scheme"
             "adb-984752964297111.11.azuredatabricks.net" "984752964297111";
           (* GCP: purely numeric first label. *)
-          wsid_ok "gcp-numeric"
-            "https://1234567890123456.7.gcp.databricks.com" "1234567890123456";
+          wsid_ok "gcp-numeric" "https://1234567890123456.7.gcp.databricks.com"
+            "1234567890123456";
           (* A bare numeric id label. *)
-          wsid_ok "bare-numeric" "https://5551234.cloud.databricks.com" "5551234";
+          wsid_ok "bare-numeric" "https://5551234.cloud.databricks.com"
+            "5551234";
           (* Trailing http:// scheme is also stripped. *)
           wsid_ok "http-scheme" "http://adb-42.9.azuredatabricks.net" "42";
           (* First digit run wins over any later digits in the same label. *)
@@ -67,20 +68,23 @@ let () =
       ( "endpoint_of_workspace",
         [
           (* Explicit endpoint is used verbatim (host or host:port). *)
-          ep_ok "explicit-host-port" ~endpoint:"1.2.3.4:9443"
-            ~workspace_url:"" "1.2.3.4" 9443;
+          ep_ok "explicit-host-port" ~endpoint:"1.2.3.4:9443" ~workspace_url:""
+            "1.2.3.4" 9443;
           ep_ok "explicit-host-only" ~endpoint:"myhost.example.com"
             ~workspace_url:"" "myhost.example.com" 443;
           (* Already-zerobus-form workspace URLs (region present) → used directly,
              per cloud. *)
           ep_ok "aws-zerobus-form" ~endpoint:""
-            ~workspace_url:"https://1234567890.zerobus.us-west-2.cloud.databricks.com"
+            ~workspace_url:
+              "https://1234567890.zerobus.us-west-2.cloud.databricks.com"
             "1234567890.zerobus.us-west-2.cloud.databricks.com" 443;
           ep_ok "azure-zerobus-form" ~endpoint:""
-            ~workspace_url:"https://984752964297111.zerobus.eastus2.azuredatabricks.net"
+            ~workspace_url:
+              "https://984752964297111.zerobus.eastus2.azuredatabricks.net"
             "984752964297111.zerobus.eastus2.azuredatabricks.net" 443;
           ep_ok "gcp-zerobus-form" ~endpoint:""
-            ~workspace_url:"https://1234567890123456.zerobus.us-central1.gcp.databricks.com"
+            ~workspace_url:
+              "https://1234567890123456.zerobus.us-central1.gcp.databricks.com"
             "1234567890123456.zerobus.us-central1.gcp.databricks.com" 443;
           (* Console workspace URLs carry NO region → we must NOT guess a host; we
              return an actionable Error (per cloud) instead of the old wrong host. *)

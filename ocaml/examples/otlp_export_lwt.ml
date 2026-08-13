@@ -7,7 +7,6 @@
     OpenTelemetry types in [Zerobus_otlp_proto]. *)
 
 let ( let* ) = Lwt.bind
-
 let env k = try Sys.getenv k with Not_found -> failwith ("set env " ^ k)
 
 module OLogs = Zerobus_otlp_proto.Logs
@@ -24,7 +23,7 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
   in
   match client_r with
   | Error e -> Lwt.return (Error e)
-  | Ok client ->
+  | Ok client -> (
       (* A minimal batch of two log records under one resource/scope. *)
       let log_records =
         List.map
@@ -40,7 +39,7 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
         ]
       in
       let* r = Zerobus_otlp.export_logs client resource_logs in
-      (match r with
+      match r with
       | Ok res ->
           Printf.printf "exported logs (rejected=%Ld)\n%!" res.rejected;
           Lwt.return (Ok ())

@@ -6,7 +6,14 @@
 ; here) AND tls-async (so zerobus-async selects the real Oauth backend the lib
 ; uses). The dir VANISHES on switches lacking either (e.g. the canonical fl414)
 ; instead of erroring. It lights up on a combined tls-async + cohttp-async switch.
-; NOT in CI. The live path is validated directly by test_integration/.
+;
+; Uniquely NOT in CI even on the bespoke-switch job: this dir's mock collector
+; (otlp_collector_async.ml) uses Grpc_async.Server, which only exists in
+; grpc-async 0.2.0 (async v0.16) — but tls-async.0.17.0 pins async to v0.15 /
+; grpc-async 0.1.0, and the two cannot coexist on one switch. The Async OTLP
+; export path is covered in that job by test_otlp_otel_async (Lwt collector) and
+; live by test_integration/. This dir stays runnable on a hypothetical async-v0.16
+; + tls-async switch, should one ever exist.
 (executable
  (name otlp_collector_async)
  (modules otlp_collector_async)

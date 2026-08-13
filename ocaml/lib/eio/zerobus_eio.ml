@@ -10,15 +10,15 @@
 
     {b Auth.} {!with_stream_oauth} does a full client-credentials OAuth mint
     (HTTPS to /oidc/v1/token via cohttp-eio) and opens a live TLS stream — the
-    ergonomic path. {!with_stream} takes caller-supplied [headers] instead (custom
-    auth, or [~tls:false] against a cleartext mock).
+    ergonomic path. {!with_stream} takes caller-supplied [headers] instead
+    (custom auth, or [~tls:false] against a cleartext mock).
 
-    The cardinal rule of ingestion: queue records in a loop, then [flush] once. *)
+    The cardinal rule of ingestion: queue records in a loop, then [flush] once.
+*)
 
 module Core_z = Zerobus_core
 module Io_eio = Zerobus_io_eio
 
-(** A Zerobus client holds workspace metadata and the derived gRPC endpoint. *)
 type t = {
   workspace_url : string;
   workspace_id : string;
@@ -26,6 +26,7 @@ type t = {
   endpoint_port : int;
   application_name : string option;
 }
+(** A Zerobus client holds workspace metadata and the derived gRPC endpoint. *)
 
 (** The concrete driver behind a stream: the default [EphemeralStream] driver
     (JSON/Proto) or the Arrow/Flight [DoPut] driver, chosen by [record_type] at
@@ -34,8 +35,8 @@ type stream_impl =
   | Ephemeral of Io_eio.Stream.stream
   | Flight of Io_eio.Stream_flight.stream
 
-(** A live stream, valid only within the {!with_stream} body that owns it. *)
 type stream = { impl : stream_impl; table_name : string }
+(** A live stream, valid only within the {!with_stream} body that owns it. *)
 
 type offset = Core_z.Options.offset
 type table_properties = Core_z.Options.table_properties
@@ -43,7 +44,9 @@ type stream_options = Core_z.Options.stream_options
 
 let default_stream_options = Core_z.Options.default_stream_options
 
-let _ = fun (x : t) -> ignore (x.workspace_url, x.workspace_id, x.application_name)
+let _ =
+ fun (x : t) -> ignore (x.workspace_url, x.workspace_id, x.application_name)
+
 let _ = fun (x : stream) -> ignore x.table_name
 
 (** {1 Ingestion operations (direct-style — no monad)} *)
@@ -89,8 +92,8 @@ let open_impl ~host ~port ~tls ~headers ~options ~table scope :
         (Io_eio.Stream.open_stream ~host ~port ~tls ~headers ~options ~table
            scope)
 
-(** Construct a client from workspace URL and optional gRPC endpoint. Derives the
-    endpoint from [workspace_url] when [endpoint] is empty/"default". *)
+(** Construct a client from workspace URL and optional gRPC endpoint. Derives
+    the endpoint from [workspace_url] when [endpoint] is empty/"default". *)
 let create ?(application_name : string option) ~endpoint ~workspace_url () :
     (t, Core_z.Error.t) result =
   match Core_z.Config.workspace_id_of_url workspace_url with
@@ -112,19 +115,18 @@ let create ?(application_name : string option) ~endpoint ~workspace_url () :
     the stream + its scope down on exit (bracket form — the Eio-idiomatic shape,
     since the ack-reader fiber lives in the scope's switch).
 
-    [env] and [sw] come from the caller's [Eio_main.run] / [Switch.run]; they are
-    installed into the transport context for the duration of [f]. [tls] defaults
-    to [true]; pass [false] for a cleartext-h2c mock. [:authority] is derived from
-    the endpoint if [headers] did not include it. [authenticator] overrides the
-    system trust store for the TLS handshake (default: [Ca_certs]) — mainly for
-    tests that pin a self-signed server cert.
+    [env] and [sw] come from the caller's [Eio_main.run] / [Switch.run]; they
+    are installed into the transport context for the duration of [f]. [tls]
+    defaults to [true]; pass [false] for a cleartext-h2c mock. [:authority] is
+    derived from the endpoint if [headers] did not include it. [authenticator]
+    overrides the system trust store for the TLS handshake (default: [Ca_certs])
+    — mainly for tests that pin a self-signed server cert.
 
     Returns the result of [f], or [Error] if the stream could not be opened. *)
 let with_stream ~env ~sw ?(tls = true) ?authenticator client
-    (table_props : table_properties)
-    ~(headers : (string * string) list)
-    ?(options = default_stream_options)
-    (f : stream -> 'a) : ('a, Core_z.Error.t) result =
+    (table_props : table_properties) ~(headers : (string * string) list)
+    ?(options = default_stream_options) (f : stream -> 'a) :
+    ('a, Core_z.Error.t) result =
   let net = Eio.Stdenv.net env in
   Io_eio.Ctx.with_env ?authenticator ~net ~sw (fun () ->
       let headers =
@@ -182,32 +184,44 @@ let mint_token ~env ~sw ~(client : t) ~table ~client_id ~client_secret :
             in
             Tls_eio.client_of_flow ?host cfg raw
         in
-        let httpc = Cohttp_eio.Client.make ~https:(Some https) (Eio.Stdenv.net env) in
+        let httpc =
+          Cohttp_eio.Client.make ~https:(Some https) (Eio.Stdenv.net env)
+        in
         let basic = Base64.encode_string (client_id ^ ":" ^ client_secret) in
         let headers =
           Http.Header.of_list
-            [ ("Content-Type", "application/x-www-form-urlencoded");
-              ("Authorization", "Basic " ^ basic) ]
+            [
+              ("Content-Type", "application/x-www-form-urlencoded");
+              ("Authorization", "Basic " ^ basic);
+            ]
         in
         let uri = Uri.of_string (client.workspace_url ^ "/oidc/v1/token") in
         let resp, rbody =
           Cohttp_eio.Client.post ~sw httpc ~headers
-            ~body:(Cohttp_eio.Body.of_string body) uri
+            ~body:(Cohttp_eio.Body.of_string body)
+            uri
         in
-        let body_str = Eio.Buf_read.(parse_exn take_all) rbody ~max_size:max_int in
+        let body_str =
+          Eio.Buf_read.(parse_exn take_all) rbody ~max_size:max_int
+        in
         let code = Http.Status.to_int resp.Http.Response.status in
         if code < 200 || code >= 300 then
-          Error (Core_z.Error.Auth_error (Printf.sprintf "token endpoint HTTP %d" code))
+          Error
+            (Core_z.Error.Auth_error
+               (Printf.sprintf "token endpoint HTTP %d" code))
         else
           match Yojson.Safe.from_string body_str with
           | `Assoc l -> (
               match List.assoc_opt "access_token" l with
               | Some (`String t) -> Ok t
-              | _ -> Error (Core_z.Error.Auth_error "no access_token in response"))
+              | _ ->
+                  Error (Core_z.Error.Auth_error "no access_token in response"))
           | _ -> Error (Core_z.Error.Auth_error "malformed token response")
       with exn ->
-        Error (Core_z.Error.Transport_error
-                 (Printf.sprintf "token request failed: %s" (Printexc.to_string exn))))
+        Error
+          (Core_z.Error.Transport_error
+             (Printf.sprintf "token request failed: %s" (Printexc.to_string exn)))
+      )
 
 (** Open a stream with built-in client-credentials OAuth and run [f] with it
     (bracket form). Mints a table-scoped token (HTTPS to /oidc/v1/token), builds
@@ -225,8 +239,11 @@ let with_stream_oauth ~env ~sw client (table_props : table_properties)
   | Error e -> Error e
   | Ok token ->
       let headers =
-        [ ("authorization", "Bearer " ^ token);
-          ("x-databricks-zerobus-table-name", table_props.Core_z.Options.table_name) ]
+        [
+          ("authorization", "Bearer " ^ token);
+          ( "x-databricks-zerobus-table-name",
+            table_props.Core_z.Options.table_name );
+        ]
       in
       with_stream ~env ~sw ~tls:true client table_props ~headers ~options f
 

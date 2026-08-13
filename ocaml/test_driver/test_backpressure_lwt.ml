@@ -1,13 +1,13 @@
-(** No-data-loss overflow policy (#1) acceptance. The un-acked replay buffer must
-    NEVER silently drop records; when it fills, [overflow_policy] decides:
+(** No-data-loss overflow policy (#1) acceptance. The un-acked replay buffer
+    must NEVER silently drop records; when it fills, [overflow_policy] decides:
 
     - [Fail]: [ingest] returns [Error (Backpressure _)] once the buffer is full
       (here [max_inflight_requests = 5] against the never-acking mock), so the
       caller can react. No record is dropped or corrupted.
-    - [Block]: [ingest] parks until the ack-reader drains the buffer, then proceeds.
-      Against the well-behaved mock (which acks everything), a tiny bound must still
-      let ALL records through — the flush confirms every one durably acked, proving
-      backpressure throttles rather than loses.
+    - [Block]: [ingest] parks until the ack-reader drains the buffer, then
+      proceeds. Against the well-behaved mock (which acks everything), a tiny
+      bound must still let ALL records through — the flush confirms every one
+      durably acked, proving backpressure throttles rather than loses.
 
     Separate-process mocks, cleartext h2c. *)
 
@@ -24,7 +24,9 @@ let exe_in_cwd name =
 let with_server exe_name (f : int -> 'a Lwt.t) : 'a Lwt.t =
   let exe = exe_in_cwd exe_name in
   let stdout_r, stdout_w = Unix.pipe () in
-  let pid = Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr in
+  let pid =
+    Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr
+  in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
   let port =
@@ -47,16 +49,20 @@ let run_fail () : (bool * bool) Lwt.t =
   with_server "ephemeral_server_noack.exe" (fun port ->
       Zerobus.Io_lwt_for_test.Scope.with_scope (fun scope ->
           let options =
-            { Opt.default_stream_options with
+            {
+              Opt.default_stream_options with
               Opt.record_type = Opt.Json;
               max_inflight_requests = 5;
               overflow_policy = Opt.Fail;
-              recovery = false }
+              recovery = false;
+            }
           in
-          let table = { Opt.table_name = "main.default.mock"; descriptor = None } in
+          let table =
+            { Opt.table_name = "main.default.mock"; descriptor = None }
+          in
           let* stream_r =
-            Z.open_stream ~host:"127.0.0.1" ~port ~tls:false ~headers:[] ~options
-              ~table scope
+            Z.open_stream ~host:"127.0.0.1" ~port ~tls:false ~headers:[]
+              ~options ~table scope
           in
           match stream_r with
           | Error _ -> Lwt.return (false, false)
@@ -66,7 +72,10 @@ let run_fail () : (bool * bool) Lwt.t =
               let rec loop i saw_bp =
                 if i >= 50 then Lwt.return saw_bp
                 else
-                  let* r = Z.ingest stream (Bytes.of_string (Printf.sprintf {|{"i":%d}|} i)) in
+                  let* r =
+                    Z.ingest stream
+                      (Bytes.of_string (Printf.sprintf {|{"i":%d}|} i))
+                  in
                   match r with
                   | Error (Zerobus_core.Error.Backpressure _) -> Lwt.return true
                   | Error _ -> Lwt.return saw_bp
@@ -84,41 +93,55 @@ let run_block () : (bool * string option) Lwt.t =
   with_server "ephemeral_server.exe" (fun port ->
       Zerobus.Io_lwt_for_test.Scope.with_scope (fun scope ->
           let options =
-            { Opt.default_stream_options with
+            {
+              Opt.default_stream_options with
               Opt.record_type = Opt.Json;
               max_inflight_requests = 8;
-              overflow_policy = Opt.Block }
+              overflow_policy = Opt.Block;
+            }
           in
-          let table = { Opt.table_name = "main.default.mock"; descriptor = None } in
+          let table =
+            { Opt.table_name = "main.default.mock"; descriptor = None }
+          in
           let* stream_r =
-            Z.open_stream ~host:"127.0.0.1" ~port ~tls:false ~headers:[] ~options
-              ~table scope
+            Z.open_stream ~host:"127.0.0.1" ~port ~tls:false ~headers:[]
+              ~options ~table scope
           in
           match stream_r with
           | Error e -> Lwt.return (false, Some (Zerobus_core.Error.to_string e))
-          | Ok stream ->
+          | Ok stream -> (
               let n = 200 in
               let rec loop i =
                 if i >= n then Lwt.return (Ok ())
                 else
-                  let* r = Z.ingest stream (Bytes.of_string (Printf.sprintf {|{"i":%d}|} i)) in
-                  match r with Ok _ -> loop (i + 1) | Error _ as e -> Lwt.return e
+                  let* r =
+                    Z.ingest stream
+                      (Bytes.of_string (Printf.sprintf {|{"i":%d}|} i))
+                  in
+                  match r with
+                  | Ok _ -> loop (i + 1)
+                  | Error _ as e -> Lwt.return e
               in
               let* ing = loop 0 in
-              (match ing with
-               | Error e -> Lwt.return (false, Some (Zerobus_core.Error.to_string e))
-               | Ok () ->
-                   let* flush_r = Z.flush stream in
-                   let* _ = Z.close stream in
-                   Lwt.return
-                     (match flush_r with
-                      | Ok () -> (true, None)
-                      | Error e -> (false, Some (Zerobus_core.Error.to_string e))))))
+              match ing with
+              | Error e ->
+                  Lwt.return (false, Some (Zerobus_core.Error.to_string e))
+              | Ok () ->
+                  let* flush_r = Z.flush stream in
+                  let* _ = Z.close stream in
+                  Lwt.return
+                    (match flush_r with
+                    | Ok () -> (true, None)
+                    | Error e -> (false, Some (Zerobus_core.Error.to_string e)))
+              )))
 
 let bounded label f =
   Lwt.pick
-    [ f ();
-      (let* () = Lwt_unix.sleep 25.0 in Lwt.fail_with (label ^ ": TIMEOUT")) ]
+    [
+      f ();
+      (let* () = Lwt_unix.sleep 25.0 in
+       Lwt.fail_with (label ^ ": TIMEOUT"));
+    ]
 
 let fail_result = lazy (Lwt_main.run (bounded "fail" run_fail))
 let block_result = lazy (Lwt_main.run (bounded "block" run_block))
@@ -140,8 +163,8 @@ let () =
           Alcotest.test_case "no error" `Slow (fun () ->
               let _, err = Lazy.force block_result in
               Alcotest.(check (option string)) "err" None err);
-          Alcotest.test_case "flush confirms all 200 acked under a bound of 8" `Slow
-            (fun () ->
+          Alcotest.test_case "flush confirms all 200 acked under a bound of 8"
+            `Slow (fun () ->
               let ok, _ = Lazy.force block_result in
               Alcotest.(check bool) "all acked" true ok);
         ] );

@@ -4,11 +4,10 @@
     stream: no persistent connection, no offsets, no recovery — just a
     table-scoped [POST .../insert] with a JSON array of records. Use it for edge
     devices, webhooks, or infrequent reporting where the "throughput tax" of a
-    round-trip per batch is fine. For high volume, use the gRPC {!Zerobus} stream
-    (loop-then-flush) instead. *)
+    round-trip per batch is fine. For high volume, use the gRPC {!Zerobus}
+    stream (loop-then-flush) instead. *)
 
 let ( let* ) = Lwt.bind
-
 let env k = try Sys.getenv k with Not_found -> failwith ("set env " ^ k)
 
 let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
@@ -26,7 +25,8 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
       (* One POST carries the whole batch as a JSON array. *)
       let records =
         List.init 10 (fun i ->
-            `Assoc [ ("id", `Int i); ("msg", `String (Printf.sprintf "row-%d" i)) ])
+            `Assoc
+              [ ("id", `Int i); ("msg", `String (Printf.sprintf "row-%d" i)) ])
       in
       Zerobus_rest.insert client ~table records
 

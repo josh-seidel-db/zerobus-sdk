@@ -18,8 +18,9 @@ type token_entry = string * float
 type t = {
   workspace_url : string;
   workspace_id : string;
-  base_url : string;  (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
-  application_name : string option [@ocaml.warning "-69"];
+  base_url : string;
+      (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   (* Token cache keyed by table name; each table has its own scope, so tokens
@@ -48,7 +49,9 @@ let base_url_of ~endpoint ~workspace_url : (string, Error.t) result =
   then
     (* Verbatim override; strip any trailing slash for clean path joining. *)
     let e =
-      if String.length endpoint > 0 && endpoint.[String.length endpoint - 1] = '/'
+      if
+        String.length endpoint > 0
+        && endpoint.[String.length endpoint - 1] = '/'
       then String.sub endpoint 0 (String.length endpoint - 1)
       else endpoint
     in
@@ -94,7 +97,7 @@ let mint_token t ~table : (string, error) result Lwt.t =
             Config.oauth_token_request_body ~workspace_id:t.workspace_id ~table
           with
           | Error e -> Lwt.return (Error e)
-          | Ok body -> (
+          | Ok body ->
               let token_url = t.workspace_url ^ "/oidc/v1/token" in
               let basic =
                 Base64.encode_string (t.client_id ^ ":" ^ t.client_secret)
@@ -162,9 +165,10 @@ let mint_token t ~table : (string, error) result Lwt.t =
                     (Error
                        (Error.Transport_error
                           (Printf.sprintf "token request failed: %s"
-                             (Printexc.to_string exn))))))))
+                             (Printexc.to_string exn)))))))
 
-let insert t ~table (records : Yojson.Safe.t list) : (unit, error) result Lwt.t =
+let insert t ~table (records : Yojson.Safe.t list) : (unit, error) result Lwt.t
+    =
   match records with
   | [] -> Lwt.return (Ok ())
   | _ -> (
@@ -187,7 +191,8 @@ let insert t ~table (records : Yojson.Safe.t list) : (unit, error) result Lwt.t 
             (fun () ->
               let* resp, resp_body =
                 Cohttp_lwt_unix.Client.post ~headers
-                  ~body:(Cohttp_lwt.Body.of_string body) (Uri.of_string url)
+                  ~body:(Cohttp_lwt.Body.of_string body)
+                  (Uri.of_string url)
               in
               let status =
                 Cohttp.Response.status resp |> Cohttp.Code.code_of_status

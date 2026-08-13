@@ -7,8 +7,9 @@
     imperative [send]/[close_send]/[recv]. We bridge by running the call as a
     background promise, handing [write] and the response stream back through
     [Lwt_mvar]s; [recv] then pulls straight from the [Lwt_stream]. This is the
-    reusable core the real streaming driver builds on. Phase 2 wires cleartext h2c
-    (loopback mock); TLS+ALPN (proven in [spike-live/]) layers on in Phase 3. *)
+    reusable core the real streaming driver builds on. Phase 2 wires cleartext
+    h2c (loopback mock); TLS+ALPN (proven in [spike-live/]) layers on in Phase
+    3. *)
 
 module Error = Zerobus_core.Error
 
@@ -37,7 +38,8 @@ module Scope = struct
              (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
              scope.daemons))
 
-  let register (scope : t) (d : unit Lwt.t) = scope.daemons <- d :: scope.daemons
+  let register (scope : t) (d : unit Lwt.t) =
+    scope.daemons <- d :: scope.daemons
 end
 
 let both (a : unit -> 'a t) (b : unit -> 'b t) : ('a * 'b) t =
@@ -45,8 +47,7 @@ let both (a : unit -> 'a t) (b : unit -> 'b t) : ('a * 'b) t =
 
 (* First-wins race: Lwt.pick returns the first promise to resolve and CANCELS the
    others — exactly the abandon-the-loser semantics {!Io.IO.first} wants. *)
-let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t =
-  Lwt.pick [ a (); b () ]
+let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t = Lwt.pick [ a (); b () ]
 
 let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
   Scope.register scope (Lwt.catch f (fun _ -> Lwt.return_unit))
@@ -126,12 +127,15 @@ let grpc_deframe (acc : string) : string list * string =
     if String.length acc < 5 then (List.rev msgs, acc)
     else
       let len =
-        (Char.code acc.[1] lsl 24) lor (Char.code acc.[2] lsl 16)
-        lor (Char.code acc.[3] lsl 8) lor Char.code acc.[4]
+        (Char.code acc.[1] lsl 24)
+        lor (Char.code acc.[2] lsl 16)
+        lor (Char.code acc.[3] lsl 8)
+        lor Char.code acc.[4]
       in
       if String.length acc < 5 + len then (List.rev msgs, acc)
       else
-        loop (String.sub acc (5 + len) (String.length acc - 5 - len))
+        loop
+          (String.sub acc (5 + len) (String.length acc - 5 - len))
           (String.sub acc 5 len :: msgs)
   in
   loop acc []
@@ -155,8 +159,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
      client) so we can flush each frame. *)
   type call = {
     body : H2.Body.Writer.t;
-    responses : string Mailbox.t;  (* deframed gRPC messages *)
-    mutable grpc_status : (int * string) option;  (* from trailers *)
+    responses : string Mailbox.t; (* deframed gRPC messages *)
+    mutable grpc_status : (int * string) option; (* from trailers *)
     mutable send_closed : bool;
   }
 
@@ -171,7 +175,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     match addrs with
     | [] ->
         Lwt.return
-          (Error (Error.Transport_error (Printf.sprintf "no address for %s" host)))
+          (Error
+             (Error.Transport_error (Printf.sprintf "no address for %s" host)))
     | ai :: _ ->
         let sockaddr = ai.Unix.ai_addr in
         (* Derive the socket family from the resolved address (IPv4/IPv6) rather
@@ -179,7 +184,9 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
         let fd = Lwt_unix.socket ai.Unix.ai_family ai.Unix.ai_socktype 0 in
         (* Close the fd on any failure after this point (no leak on the recovery
            reconnect loop). *)
-        let close_fd () = Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit) in
+        let close_fd () =
+          Lwt.catch (fun () -> Lwt_unix.close fd) (fun _ -> Lwt.return_unit)
+        in
         Lwt.catch
           (fun () ->
             let* () = Lwt_unix.connect fd sockaddr in
@@ -194,7 +201,10 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
                 in
                 let peer_name =
                   match Domain_name.of_string host with
-                  | Ok d -> ( match Domain_name.host d with Ok h -> Some h | Error _ -> None)
+                  | Ok d -> (
+                      match Domain_name.host d with
+                      | Ok h -> Some h
+                      | Error _ -> None)
                   | Error _ -> None
                 in
                 let cfg =
@@ -212,18 +222,20 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
                 | Some "h2" ->
                     let* h2_tls =
                       H2_lwt_unix.Client.TLS.create_connection
-                        ~error_handler:(fun _ -> ()) tls_conn
+                        ~error_handler:(fun _ -> ())
+                        tls_conn
                     in
                     Lwt.return (Tls h2_tls)
                 | Some other ->
-                    Lwt.fail_with
-                      (Printf.sprintf "ALPN != h2 (got %s)" other)
+                    Lwt.fail_with (Printf.sprintf "ALPN != h2 (got %s)" other)
                 | None -> Lwt.fail_with "ALPN not negotiated (no h2)"
               end
               else
                 (* Cleartext h2c for loopback test mocks. *)
                 let* h2_plain =
-                  H2_lwt_unix.Client.create_connection ~error_handler:(fun _ -> ()) fd
+                  H2_lwt_unix.Client.create_connection
+                    ~error_handler:(fun _ -> ())
+                    fd
                 in
                 Lwt.return (Plain h2_plain)
             in
@@ -231,8 +243,7 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
           (fun exn ->
             (* close the fd so failed connects/handshakes don't leak descriptors *)
             let* () = close_fd () in
-            Lwt.return
-              (Error (Error.Transport_error (Printexc.to_string exn))))
+            Lwt.return (Error (Error.Transport_error (Printexc.to_string exn))))
 
   let start_bidi (conn : connection) ~service ~rpc ?(headers = []) () :
       (call, Error.t) result io =
@@ -252,17 +263,21 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
        h2 rejects a repeated pseudo-header with a stream/protocol error, which
        manifests as a silently stalled RPC. [:authority] is already folded into
        [authority] above; [host] is a synthetic key the caller uses to hint it. *)
-    let ours = [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ] in
+    let ours =
+      [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ]
+    in
     let caller =
       List.filter
         (fun (k, _) -> not (List.mem k ours))
         (conn.conn_headers @ headers)
     in
     let base_headers =
-      [ (":authority", authority);
+      [
+        (":authority", authority);
         ("te", "trailers");
         ("content-type", "application/grpc+proto");
-        ("grpc-encoding", "identity") ]
+        ("grpc-encoding", "identity");
+      ]
       @ caller
     in
     let req =
@@ -287,19 +302,21 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     let trailers_handler (h : H2.Headers.t) =
       match (H2.Headers.get h "grpc-status", !call_ref) with
       | Some s, Some c ->
-          let msg = Option.value (H2.Headers.get h "grpc-message") ~default:"" in
+          let msg =
+            Option.value (H2.Headers.get h "grpc-message") ~default:""
+          in
           c.grpc_status <- Some ((try int_of_string s with _ -> -1), msg)
       | _ -> ()
     in
     let body =
       match conn.h2 with
       | Plain h2 ->
-          H2_lwt_unix.Client.request h2 req ~error_handler:(fun _ ->
-              Mailbox.close responses)
+          H2_lwt_unix.Client.request h2 req
+            ~error_handler:(fun _ -> Mailbox.close responses)
             ~trailers_handler ~response_handler
       | Tls h2 ->
-          H2_lwt_unix.Client.TLS.request h2 req ~error_handler:(fun _ ->
-              Mailbox.close responses)
+          H2_lwt_unix.Client.TLS.request h2 req
+            ~error_handler:(fun _ -> Mailbox.close responses)
             ~trailers_handler ~response_handler
     in
     let call = { body; responses; grpc_status = None; send_closed = false } in
@@ -353,16 +370,21 @@ let sleep = Lwt_unix.sleep
 module Io_impl = struct
   type 'a t = 'a Lwt.t
   type 'a io = 'a t
+
   let return = return
   let bind = bind
   let map = map
+
   module Scope = Scope
+
   let both = both
   let first = first
   let fork_daemon = fork_daemon
+
   module Mutex = Mutex
   module Mailbox = Mailbox
   module H2_client = H2_client
+
   let sleep = sleep
 end
 
@@ -374,7 +396,9 @@ module Stream = Zerobus_core.Make (Io_impl)
    the façade when [record_type = Arrow]. Needs no libarrow (Flight_protocol carries
    the IPC bytes opaquely; the caller supplies them via the zerobus-arrow codec). *)
 module Stream_flight =
-  Zerobus_core.Stream.Make_with_protocol (Io_impl) (Zerobus_core.Flight_protocol)
+  Zerobus_core.Stream.Make_with_protocol
+    (Io_impl)
+    (Zerobus_core.Flight_protocol)
 
-(** A stream_handle is the opaque type returned by {!Stream.open_stream}. *)
 type stream_handle = Stream.stream
+(** A stream_handle is the opaque type returned by {!Stream.open_stream}. *)

@@ -1,17 +1,19 @@
 (** Async instantiation of {!Zerobus_core.Io.IO}.
 
-    Mirrors the Lwt shim ({!Zerobus_io_lwt}) on Jane Street's Async: [Deferred.t]
-    is the effect; the [Mailbox] is a bounded [Pipe]; [send] frames+flushes each
-    message on the h2 request body, [recv] drains deframed responses.
+    Mirrors the Lwt shim ({!Zerobus_io_lwt}) on Jane Street's Async:
+    [Deferred.t] is the effect; the [Mailbox] is a bounded [Pipe]; [send]
+    frames+flushes each message on the h2 request body, [recv] drains deframed
+    responses.
 
-    {b Transport.} We drive the runtime-agnostic {!H2.Client_connection} core over
-    an Async [Reader]/[Writer] duplex ourselves (see {!H2_pump}) — NOT
-    gluten-async / h2-async, whose TLS backend is a build-time [select] shipping a
-    dummy on our switches (and which does not compile against current tls). The
-    duplex is a plain [Tcp.connect] for cleartext h2c (mocks) or a [tls-async]
-    channel for live TLS 1.3 + ALPN h2 (see {!Tls_connect}, a dune [select] on the
-    optional [tls-async] dep). Live-proven against the real Zerobus endpoint
-    (spike-async-tls/); cleartext shape proven in [spike-async/]. *)
+    {b Transport.} We drive the runtime-agnostic {!H2.Client_connection} core
+    over an Async [Reader]/[Writer] duplex ourselves (see {!H2_pump}) — NOT
+    gluten-async / h2-async, whose TLS backend is a build-time [select] shipping
+    a dummy on our switches (and which does not compile against current tls).
+    The duplex is a plain [Tcp.connect] for cleartext h2c (mocks) or a
+    [tls-async] channel for live TLS 1.3 + ALPN h2 (see {!Tls_connect}, a dune
+    [select] on the optional [tls-async] dep). Live-proven against the real
+    Zerobus endpoint (spike-async-tls/); cleartext shape proven in
+    [spike-async/]. *)
 
 open! Core
 open! Async
@@ -41,12 +43,14 @@ module Scope = struct
         Ivar.fill_if_empty scope.stop ();
         (* Best-effort join, bounded so an uncancellable daemon can't hang exit. *)
         Deferred.any
-          [ Deferred.all_unit scope.daemons;
+          [
+            Deferred.all_unit scope.daemons;
             (* [Time_ns]/[Clock_ns] (not [Time_float]) so the transport compiles on
                BOTH async v0.16 (fl414, canonical) and async v0.15 — the latter is
                forced by the tls-async 0.17.0 in-tree live-TLS test switch, where
                [Time_float] is absent (see doc/arch/tls_async_status.md). *)
-            Async.Clock_ns.after (Time_ns.Span.of_ms 0.) ])
+            Async.Clock_ns.after (Time_ns.Span.of_ms 0.);
+          ])
 
   let register (scope : t) (d : unit Deferred.t) =
     scope.daemons <- d :: scope.daemons
@@ -69,8 +73,10 @@ let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
      unblock a cooperative daemon; an uncancellable one is abandoned (see Scope). *)
   let d =
     Deferred.any
-      [ (Monitor.try_with ~run:`Now (fun () -> f ()) |> Deferred.ignore_m);
-        Scope.stopped scope ]
+      [
+        Monitor.try_with ~run:`Now (fun () -> f ()) |> Deferred.ignore_m;
+        Scope.stopped scope;
+      ]
   in
   Scope.register scope d
 
@@ -95,9 +101,7 @@ module Mailbox = struct
   let put t x =
     if Pipe.is_closed t.w then Deferred.return () else Pipe.write t.w x
 
-  let take t =
-    Pipe.read t.r >>| function `Ok x -> Some x | `Eof -> None
-
+  let take t = Pipe.read t.r >>| function `Ok x -> Some x | `Eof -> None
   let close t = Pipe.close t.w
 end
 
@@ -121,12 +125,15 @@ let grpc_deframe (acc : string) : string list * string =
     if String.length acc < 5 then (List.rev msgs, acc)
     else
       let len =
-        (Char.to_int acc.[1] lsl 24) lor (Char.to_int acc.[2] lsl 16)
-        lor (Char.to_int acc.[3] lsl 8) lor Char.to_int acc.[4]
+        (Char.to_int acc.[1] lsl 24)
+        lor (Char.to_int acc.[2] lsl 16)
+        lor (Char.to_int acc.[3] lsl 8)
+        lor Char.to_int acc.[4]
       in
       if String.length acc < 5 + len then (List.rev msgs, acc)
       else
-        loop (String.sub acc ~pos:(5 + len) ~len:(String.length acc - 5 - len))
+        loop
+          (String.sub acc ~pos:(5 + len) ~len:(String.length acc - 5 - len))
           (String.sub acc ~pos:5 ~len :: msgs)
   in
   loop acc []
@@ -141,9 +148,9 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
   type connection = {
     make_request :
       H2.Request.t ->
-      error_handler:(H2.Client_connection.error_handler) ->
-      response_handler:(H2.Client_connection.response_handler) ->
-      trailers_handler:(H2.Client_connection.trailers_handler) ->
+      error_handler:H2.Client_connection.error_handler ->
+      response_handler:H2.Client_connection.response_handler ->
+      trailers_handler:H2.Client_connection.trailers_handler ->
       H2.Body.Writer.t;
     shutdown_conn : unit -> unit Deferred.t;
     scheme : string;
@@ -168,7 +175,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
       connection =
     let error_handler _ = () in
     let h2 =
-      H2.Client_connection.create ?config:None ?push_handler:None ~error_handler ()
+      H2.Client_connection.create ?config:None ?push_handler:None ~error_handler
+        ()
     in
     H2_pump.start h2 ~reader ~writer;
     {
@@ -193,35 +201,39 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
       match%map Tls_connect.connect ~host ~port with
       | Error msg -> Error (Error.Transport_error msg)
       | Ok (reader, writer, shutdown) ->
-          Ok (connection_of_duplex ~reader ~writer ~shutdown ~scheme:"https"
-                ~headers)
+          Ok
+            (connection_of_duplex ~reader ~writer ~shutdown ~scheme:"https"
+               ~headers)
     else
       (* Cleartext h2c for loopback mocks: a plain TCP duplex. *)
       let where =
-        Tcp.Where_to_connect.of_host_and_port
-          (Host_and_port.create ~host ~port)
+        Tcp.Where_to_connect.of_host_and_port (Host_and_port.create ~host ~port)
       in
-      Monitor.try_with ~run:`Now (fun () -> Tcp.connect where)
-      >>| function
+      Monitor.try_with ~run:`Now (fun () -> Tcp.connect where) >>| function
       | Error exn -> Error (Error.Transport_error (Exn.to_string exn))
       | Ok (_socket, reader, writer) ->
           let shutdown () =
             Writer.close writer >>= fun () -> Reader.close reader
           in
-          Ok (connection_of_duplex ~reader ~writer ~shutdown ~scheme:"http"
-                ~headers)
+          Ok
+            (connection_of_duplex ~reader ~writer ~shutdown ~scheme:"http"
+               ~headers)
 
   let start_bidi (conn : connection) ~service ~rpc ?(headers = []) () :
       (call, Error.t) result io =
     let authority =
       (* :authority is required by gRPC servers (gate B finding). *)
       match
-        List.Assoc.find (conn.conn_headers @ headers) ":authority" ~equal:String.equal
+        List.Assoc.find
+          (conn.conn_headers @ headers)
+          ":authority" ~equal:String.equal
       with
       | Some a -> a
       | None -> (
           match
-            List.Assoc.find (conn.conn_headers @ headers) "host" ~equal:String.equal
+            List.Assoc.find
+              (conn.conn_headers @ headers)
+              "host" ~equal:String.equal
           with
           | Some h -> h
           | None -> "")
@@ -231,16 +243,20 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
        h2 rejects a repeated pseudo-header with a stream/protocol error, which
        manifests as a silently stalled RPC. [:authority] is already folded into
        [authority] above; [host] is a synthetic key the caller uses to hint it. *)
-    let ours = [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ] in
+    let ours =
+      [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ]
+    in
     let caller =
       List.filter (conn.conn_headers @ headers) ~f:(fun (k, _) ->
           not (List.mem ours k ~equal:String.equal))
     in
     let base_headers =
-      [ (":authority", authority);
+      [
+        (":authority", authority);
         ("te", "trailers");
         ("content-type", "application/grpc+proto");
-        ("grpc-encoding", "identity") ]
+        ("grpc-encoding", "identity");
+      ]
       @ caller
     in
     let req =
@@ -264,7 +280,9 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     let trailers_handler (h : H2.Headers.t) =
       match (H2.Headers.get h "grpc-status", !call_ref) with
       | Some s, Some c ->
-          let msg = Option.value (H2.Headers.get h "grpc-message") ~default:"" in
+          let msg =
+            Option.value (H2.Headers.get h "grpc-message") ~default:""
+          in
           c.grpc_status <- Some ((try Int.of_string s with _ -> -1), msg)
       | _ -> ()
     in
@@ -280,7 +298,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
   (* Write one framed message and flush it (the §6.5 fix), awaiting the flush via
      an Ivar so [send] returns only once the bytes have reached the wire. *)
   let send (call : call) (msg : string) : (unit, Error.t) result io =
-    if call.send_closed then return (Error (Error.Stream_error "send after close"))
+    if call.send_closed then
+      return (Error (Error.Stream_error "send after close"))
     else begin
       H2.Body.Writer.write_string call.body (grpc_frame msg);
       let flushed = Ivar.create () in
@@ -318,16 +337,21 @@ let sleep secs = Async.Clock_ns.after (Time_ns.Span.of_sec secs)
 module Io_impl = struct
   type nonrec 'a t = 'a t
   type 'a io = 'a t
+
   let return = return
   let bind = bind
   let map = map
+
   module Scope = Scope
+
   let both = both
   let first = first
   let fork_daemon = fork_daemon
+
   module Mutex = Mutex
   module Mailbox = Mailbox
   module H2_client = H2_client
+
   let sleep = sleep
 end
 
@@ -340,6 +364,8 @@ module Stream = Zerobus_core.Make (Io_impl)
    the IPC bytes opaquely, the caller supplies them via the zerobus-arrow codec) —
    mirrors {!Zerobus_io_lwt.Stream_flight} / {!Zerobus_io_eio.Stream_flight}. *)
 module Stream_flight =
-  Zerobus_core.Stream.Make_with_protocol (Io_impl) (Zerobus_core.Flight_protocol)
+  Zerobus_core.Stream.Make_with_protocol
+    (Io_impl)
+    (Zerobus_core.Flight_protocol)
 
 type stream_handle = Stream.stream

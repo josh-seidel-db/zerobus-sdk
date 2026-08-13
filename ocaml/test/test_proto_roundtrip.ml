@@ -15,18 +15,21 @@ let roundtrip enc dec v =
 let test_create_stream_request () =
   let req =
     Wire.make_create_ingest_stream_request ~table_name:"main.iot.telemetry"
-      ~descriptor_proto:(Bytes.of_string "\x0a\x04demo") ~record_type:Wire.Proto ()
+      ~descriptor_proto:(Bytes.of_string "\x0a\x04demo")
+      ~record_type:Wire.Proto ()
   in
   let out =
     roundtrip Wire.encode_pb_create_ingest_stream_request
       Wire.decode_pb_create_ingest_stream_request req
   in
-  Alcotest.(check string)
-    "table_name" "main.iot.telemetry" out.Wire.table_name;
+  Alcotest.(check string) "table_name" "main.iot.telemetry" out.Wire.table_name;
   Alcotest.(check bytes)
-    "descriptor_proto" (Bytes.of_string "\x0a\x04demo") out.Wire.descriptor_proto;
+    "descriptor_proto"
+    (Bytes.of_string "\x0a\x04demo")
+    out.Wire.descriptor_proto;
   Alcotest.(check bool)
-    "record_type=Proto" true (out.Wire.record_type = Wire.Proto)
+    "record_type=Proto" true
+    (out.Wire.record_type = Wire.Proto)
 
 (* The ingest hot path: a proto-encoded record wrapped in the EphemeralStream
    request oneof, with its offset id. *)
@@ -68,7 +71,9 @@ let test_ingest_record_json () =
 
 (* The server's durability watermark. *)
 let test_ack_response () =
-  let ack = Wire.make_ingest_record_response ~durability_ack_up_to_offset:1000L () in
+  let ack =
+    Wire.make_ingest_record_response ~durability_ack_up_to_offset:1000L ()
+  in
   let out =
     roundtrip Wire.encode_pb_ingest_record_response
       Wire.decode_pb_ingest_record_response ack

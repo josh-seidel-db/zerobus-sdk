@@ -21,8 +21,9 @@ type token_entry = string * float
 type t = {
   workspace_url : string;
   workspace_id : string;
-  base_url : string;  (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
-  application_name : string option [@ocaml.warning "-69"];
+  base_url : string;
+      (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   (* Token cache keyed by table name; each table has its own scope, so tokens
@@ -46,7 +47,9 @@ let base_url_of ~endpoint ~workspace_url : (string, Error.t) result =
        || String.starts_with ~prefix:"https://" endpoint)
   then
     let e =
-      if String.length endpoint > 0 && endpoint.[String.length endpoint - 1] = '/'
+      if
+        String.length endpoint > 0
+        && endpoint.[String.length endpoint - 1] = '/'
       then String.sub endpoint 0 (String.length endpoint - 1)
       else endpoint
     in
@@ -134,7 +137,8 @@ let mint_token ~env ~sw t ~table : (string, error) result =
                 let uri = Uri.of_string (t.workspace_url ^ "/oidc/v1/token") in
                 let resp, rbody =
                   Cohttp_eio.Client.post ~sw httpc ~headers
-                    ~body:(Cohttp_eio.Body.of_string body) uri
+                    ~body:(Cohttp_eio.Body.of_string body)
+                    uri
                 in
                 let resp_str =
                   Eio.Buf_read.(parse_exn take_all) rbody ~max_size:max_int
@@ -168,7 +172,8 @@ let mint_token ~env ~sw t ~table : (string, error) result =
                             :: List.remove_assoc table t.token_cache;
                           Ok tok
                       | None ->
-                          Error (Error.Auth_error "no access_token in response"))
+                          Error (Error.Auth_error "no access_token in response")
+                      )
                   | _ -> Error (Error.Auth_error "malformed token response")
               with exn ->
                 Error
@@ -199,7 +204,8 @@ let insert ~env ~sw t ~table (records : Yojson.Safe.t list) :
             let httpc = make_httpc env in
             let resp, rbody =
               Cohttp_eio.Client.post ~sw httpc ~headers
-                ~body:(Cohttp_eio.Body.of_string body) (Uri.of_string url)
+                ~body:(Cohttp_eio.Body.of_string body)
+                (Uri.of_string url)
             in
             let body_str =
               Eio.Buf_read.(parse_exn take_all) rbody ~max_size:max_int

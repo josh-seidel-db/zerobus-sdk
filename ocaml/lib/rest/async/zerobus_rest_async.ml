@@ -1,13 +1,13 @@
 (** The stateless REST interface for the Zerobus Ingest SDK — Async runtime
     (DESIGN.md §4.2).
 
-    The Async counterpart of {!Zerobus_rest} (the Lwt reference). Same contract —
-    a table-scoped client-credentials OAuth grant (reusing
-    [Zerobus_core.Config.oauth_token_request_body]) plus one HTTP [POST] per batch
-    — but built on [cohttp-async]. No streams, no offsets, no recovery.
+    The Async counterpart of {!Zerobus_rest} (the Lwt reference). Same contract
+    — a table-scoped client-credentials OAuth grant (reusing
+    [Zerobus_core.Config.oauth_token_request_body]) plus one HTTP [POST] per
+    batch — but built on [cohttp-async]. No streams, no offsets, no recovery.
 
-    This library is [optional]: it only builds on a switch where [cohttp-async] is
-    installed (which downgrades cohttp 6.0->5.3 — benign, see
+    This library is [optional]: it only builds on a switch where [cohttp-async]
+    is installed (which downgrades cohttp 6.0->5.3 — benign, see
     doc/arch/tls_async_status.md). Switches that only want the gRPC transport do
     not pull it. See {!Zerobus_rest_async} (the .mli) for the API contract. *)
 
@@ -24,8 +24,9 @@ type token_entry = string * float
 type t = {
   workspace_url : string;
   workspace_id : string;
-  base_url : string;  (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
-  application_name : string option [@ocaml.warning "-69"];
+  base_url : string;
+      (* e.g. https://<wsid>.zerobus.<region>....  (no trailing /) *)
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   (* Token cache keyed by table name; each table has its own scope, so tokens
@@ -100,32 +101,34 @@ let mint_token t ~table : (string, error) result Deferred.t =
           | Ok body -> (
               let token_url = t.workspace_url ^ "/oidc/v1/token" in
               match%map
-                Zerobus_async.Oauth.post_token ~token_url
-                  ~client_id:t.client_id ~client_secret:t.client_secret ~body
+                Zerobus_async.Oauth.post_token ~token_url ~client_id:t.client_id
+                  ~client_secret:t.client_secret ~body
               with
               | Error exn ->
                   Error
                     (Error.Transport_error
                        (Printf.sprintf "token request failed: %s"
                           (Exn.to_string exn)))
-              | Ok (code, body_str) ->
+              | Ok (code, body_str) -> (
                   if code < 200 || code >= 300 then
                     Error
                       (Error.Auth_error
                          (Printf.sprintf "token endpoint HTTP %d" code))
-                  else (
-                    match Zerobus_async.Oauth.parse_token_response ~now body_str with
+                  else
+                    match
+                      Zerobus_async.Oauth.parse_token_response ~now body_str
+                    with
                     | Some (tok, expiry) ->
                         t.token_cache <-
                           (table, (tok, expiry))
                           :: List.Assoc.remove t.token_cache table
                                ~equal:String.equal;
                         Ok tok
-                    | None -> Error (Error.Auth_error "malformed token response"))
-              )))
+                    | None ->
+                        Error (Error.Auth_error "malformed token response")))))
 
-let insert t ~table (records : Yojson.Safe.t list) : (unit, error) result Deferred.t
-    =
+let insert t ~table (records : Yojson.Safe.t list) :
+    (unit, error) result Deferred.t =
   match records with
   | [] -> return (Ok ())
   | _ -> (

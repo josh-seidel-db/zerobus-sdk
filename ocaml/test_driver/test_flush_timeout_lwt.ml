@@ -1,8 +1,9 @@
 (** Flush-timeout acceptance: against a mock that accepts the stream but NEVER
-    acks, [flush] with a short [flush_timeout_ms] must return [Error (Timeout _)]
-    within roughly that window — not hang forever. This locks in the wired-up
-    [flush_timeout_ms] / [server_lack_of_ack_timeout_ms] (a live Azure test found
-    flush hung indefinitely when the server never acked). *)
+    acks, [flush] with a short [flush_timeout_ms] must return
+    [Error (Timeout _)] within roughly that window — not hang forever. This
+    locks in the wired-up [flush_timeout_ms] / [server_lack_of_ack_timeout_ms]
+    (a live Azure test found flush hung indefinitely when the server never
+    acked). *)
 
 module Z = Zerobus.Driver
 module Opt = Zerobus_core.Options
@@ -18,7 +19,9 @@ let server_exe () =
 let with_server (f : unit -> 'a Lwt.t) : 'a Lwt.t =
   let exe = server_exe () in
   let stdout_r, stdout_w = Unix.pipe () in
-  let pid = Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr in
+  let pid =
+    Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr
+  in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
   (try
@@ -32,7 +35,10 @@ let with_server (f : unit -> 'a Lwt.t) : 'a Lwt.t =
       (try close_in ic with _ -> ());
       Lwt.return_unit)
 
-type outcome = { flush_result : (unit, Zerobus_core.Error.t) result; elapsed : float }
+type outcome = {
+  flush_result : (unit, Zerobus_core.Error.t) result;
+  elapsed : float;
+}
 
 let run () : outcome Lwt.t =
   Zerobus.Io_lwt_for_test.Scope.with_scope (fun scope ->
@@ -47,7 +53,9 @@ let run () : outcome Lwt.t =
           recovery = false;
         }
       in
-      let table = { Opt.table_name = "main.default.noack"; descriptor = None } in
+      let table =
+        { Opt.table_name = "main.default.noack"; descriptor = None }
+      in
       let* stream_r =
         Z.open_stream ~host:"127.0.0.1" ~port:!port ~tls:false ~headers:[]
           ~options ~table scope
@@ -64,7 +72,9 @@ let run () : outcome Lwt.t =
 
 let result = lazy (Lwt_main.run (with_server run))
 
-let is_timeout = function Error (Zerobus_core.Error.Timeout _) -> true | _ -> false
+let is_timeout = function
+  | Error (Zerobus_core.Error.Timeout _) -> true
+  | _ -> false
 
 let () =
   Alcotest.run "flush-timeout"
@@ -77,9 +87,10 @@ let () =
               Alcotest.(check bool)
                 (Printf.sprintf "timeout (got %s)"
                    (match o.flush_result with
-                    | Ok () -> "Ok"
-                    | Error e -> Zerobus_core.Error.to_string e))
-                true (is_timeout o.flush_result));
+                   | Ok () -> "Ok"
+                   | Error e -> Zerobus_core.Error.to_string e))
+                true
+                (is_timeout o.flush_result));
           Alcotest.test_case "returned near the timeout window" `Slow (fun () ->
               let o = Lazy.force result in
               (* ~1.5s configured; allow generous slack but assert it did NOT hang. *)

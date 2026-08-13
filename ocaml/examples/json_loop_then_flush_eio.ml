@@ -1,9 +1,9 @@
 (** Example 3 — loop then flush on Eio (direct-style, JSON).
 
-    The same cardinal rule as the Lwt example — queue in a loop, flush once — but
-    in Eio's direct style (no monad) and bracket shape: [with_stream_oauth] owns
-    the stream's [Switch] for the duration of the body and tears it down on exit,
-    because the ack-reader runs as a fiber inside that switch.
+    The same cardinal rule as the Lwt example — queue in a loop, flush once —
+    but in Eio's direct style (no monad) and bracket shape: [with_stream_oauth]
+    owns the stream's [Switch] for the duration of the body and tears it down on
+    exit, because the ack-reader runs as a fiber inside that switch.
 
     [env] and [sw] come from the caller's [Eio_main.run] / [Switch.run]. *)
 
@@ -46,7 +46,8 @@ let () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   match run ~env:(env :> Eio_unix.Stdenv.base) ~sw with
-  | Ok () -> print_endline "OK — 1000 records ingested and flushed durably (Eio)"
+  | Ok () ->
+      print_endline "OK — 1000 records ingested and flushed durably (Eio)"
   | Error e ->
       prerr_endline ("FAILED: " ^ Zerobus_core.Error.to_string e);
       exit 1

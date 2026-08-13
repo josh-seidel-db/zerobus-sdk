@@ -1,20 +1,22 @@
 (** Async REST acceptance: {!Zerobus_rest_async} (the stateless REST insert
     helper, Async runtime) against an in-process cohttp-async mock that plays
     BOTH endpoints:
-      - [POST /oidc/v1/token]                              -> the OAuth grant
-      - [POST /zerobus/v1/tables/<table>/insert]           -> the batch insert
+    - [POST /oidc/v1/token] -> the OAuth grant
+    - [POST /zerobus/v1/tables/<table>/insert] -> the batch insert
 
     The Async counterpart of test_rest/test_rest_lwt.ml — same assertions, same
     coverage, Async idioms. Proves the full REST flow end-to-end without a live
     workspace:
-    - the client-credentials grant is issued (HTTP Basic client auth, form body),
-      and the returned bearer token is attached to the insert request;
+    - the client-credentials grant is issued (HTTP Basic client auth, form
+      body), and the returned bearer token is attached to the insert request;
     - records are POSTed as a single JSON array to the right table path;
-    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the code;
+    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the
+      code;
     - an empty batch sends nothing ([Ok ()]);
     - the token is cached (a second insert to the same table mints only once).
 
-    Cleartext HTTP, loopback, ephemeral port. Runs on a switch with cohttp-async. *)
+    Cleartext HTTP, loopback, ephemeral port. Runs on a switch with
+    cohttp-async. *)
 
 open! Core
 open! Async
@@ -81,8 +83,8 @@ let run () : outcome Deferred.t =
   let%bind port = start_server () in
   let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
   match
-    Rest.create ~endpoint:base_url ~workspace_url:base_url ~client_id:"sp-app-id"
-      ~client_secret:"sp-secret" ()
+    Rest.create ~endpoint:base_url ~workspace_url:base_url
+      ~client_id:"sp-app-id" ~client_secret:"sp-secret" ()
   with
   | Error e -> failwith (Zerobus_core.Error.to_string e)
   | Ok client ->
@@ -97,7 +99,9 @@ let run () : outcome Deferred.t =
       let%bind r2 = Rest.insert client ~table [ `Assoc [ ("id", `Int 4) ] ] in
       let%bind r_empty = Rest.insert client ~table [] in
       fail_insert := true;
-      let%bind r_err = Rest.insert client ~table [ `Assoc [ ("id", `Int 5) ] ] in
+      let%bind r_err =
+        Rest.insert client ~table [ `Assoc [ ("id", `Int 5) ] ]
+      in
       fail_insert := false;
       let err_code =
         match r_err with
@@ -106,7 +110,8 @@ let run () : outcome Deferred.t =
       in
       let path_ok =
         List.for_all
-          ~f:(fun p -> String.equal p ("/zerobus/v1/tables/" ^ table ^ "/insert"))
+          ~f:(fun p ->
+            String.equal p ("/zerobus/v1/tables/" ^ table ^ "/insert"))
           !insert_paths
       in
       let ok = function Ok () -> true | Error _ -> false in
@@ -120,7 +125,7 @@ let run () : outcome Deferred.t =
           n_inserts = List.length !insert_bodies;
           empty_ok = ok r_empty;
           err_code;
-          path_ok = (path_ok && ok r1 && ok r2);
+          path_ok = path_ok && ok r1 && ok r2;
         }
 
 let result : outcome = Thread_safe.block_on_async_exn run
@@ -134,7 +139,8 @@ let () =
      first_body    : %s\n\
      empty_is_noop : %b\n\
      error_code    : %s\n\
-     paths_correct : %b\n%!"
+     paths_correct : %b\n\
+     %!"
     result.mints result.basic result.bearer result.n_inserts result.first_body
     result.empty_ok
     (match result.err_code with Some c -> Int.to_string c | None -> "none")
@@ -150,7 +156,8 @@ let () =
           Alcotest.test_case "token cached (mints once)" `Slow (fun () ->
               Alcotest.(check int) "mints" 1 result.mints);
           Alcotest.test_case "records sent as one JSON array" `Slow (fun () ->
-              Alcotest.(check bool) "json array" true
+              Alcotest.(check bool)
+                "json array" true
                 (String.length result.first_body > 0
                 && Char.equal result.first_body.[0] '['
                 && Char.equal

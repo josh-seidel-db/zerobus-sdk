@@ -81,6 +81,7 @@ jobs:
             ocaml:
               - 'ocaml/**'
               - '.github/workflows/ci-ocaml.yml'
+              - '.github/workflows/ci-ocaml-async-bespoke.yml'
 
   # Blocking jobs — required for merge
   rust:
@@ -154,6 +155,18 @@ jobs:
       id-token: write
       contents: read
     uses: ./.github/workflows/ci-ocaml.yml
+
+  # Non-blocking: the OCaml Async live-TLS/OAuth/REST/OTLP tests, which need a
+  # bespoke tls-async + cohttp-async switch (see the workflow header). Excluded
+  # from `gate` because the pinned dependency cascade is more brittle than the
+  # standard switches and the same paths are covered live by test_integration/.
+  ocaml-async-bespoke:
+    needs: changes
+    if: needs.changes.outputs.ocaml == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/ci-ocaml-async-bespoke.yml
 
   # Non-blocking cross-SDK jobs — run all SDK tests against the local Rust
   # source when rust/** changes, to catch breakage before a new FFI release.

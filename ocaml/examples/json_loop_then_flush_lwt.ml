@@ -5,21 +5,19 @@
     sending and acknowledgement happen on background tasks. So the throughput
     recipe is:
 
-      for record in records: stream.ingest record   (* queue only — never wait *)
-      stream.flush ()                                (* wait ONCE at the end *)
+    for record in records: stream.ingest record (* queue only — never wait *)
+    stream.flush () (* wait ONCE at the end *)
 
     Calling [wait_for_offset] after every [ingest] would force one full server
     round-trip per record and collapse throughput by orders of magnitude. Don't.
 
-    Build:  dune build examples/
-    Run (needs a real workspace + service principal):
-      DATABRICKS_WORKSPACE_URL=https://adb-....azuredatabricks.net \
-      ZEROBUS_TABLE=main.default.my_table \
-      ZEROBUS_CLIENT_ID=... ZEROBUS_CLIENT_SECRET=... \
-      dune exec examples/json_loop_then_flush_lwt.exe *)
+    Build: dune build examples/ Run (needs a real workspace + service
+    principal): DATABRICKS_WORKSPACE_URL=https://adb-....azuredatabricks.net \
+    ZEROBUS_TABLE=main.default.my_table \ ZEROBUS_CLIENT_ID=...
+    ZEROBUS_CLIENT_SECRET=... \ dune exec examples/json_loop_then_flush_lwt.exe
+*)
 
 let ( let* ) = Lwt.bind
-
 let env k = try Sys.getenv k with Not_found -> failwith ("set env " ^ k)
 
 let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
@@ -36,7 +34,10 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
       (* JSON needs no descriptor; Proto would pass [descriptor = Some ...]. *)
       let table = { Zerobus_core.Options.table_name; descriptor = None } in
       let options =
-        { Zerobus.default_stream_options with record_type = Zerobus_core.Options.Json }
+        {
+          Zerobus.default_stream_options with
+          record_type = Zerobus_core.Options.Json;
+        }
       in
       let* stream_r =
         Zerobus.create_stream client table ~client_id ~client_secret ~options ()
@@ -47,7 +48,8 @@ let main () : (unit, Zerobus_core.Error.t) result Lwt.t =
           (* 1) QUEUE in a loop — do NOT wait per record. *)
           let records =
             List.init 1000 (fun i ->
-                Bytes.of_string (Printf.sprintf {|{"id": %d, "msg": "row-%d"}|} i i))
+                Bytes.of_string
+                  (Printf.sprintf {|{"id": %d, "msg": "row-%d"}|} i i))
           in
           let* () =
             Lwt_list.iter_s

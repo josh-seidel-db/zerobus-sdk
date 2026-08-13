@@ -1,14 +1,14 @@
 (** Mock OTLP collector for the Eio exporter test — a standalone process (the
     proven separate-process topology), cleartext h2c on loopback. The Eio
     counterpart of test_otlp/otlp_collector.ml: same two unary [Export] RPCs
-      - opentelemetry.proto.collector.logs.v1.LogsService/Export
-      - opentelemetry.proto.collector.metrics.v1.MetricsService/Export
-    on the grpc-eio / h2-eio stack so it links on the OCaml-5 [zbeio] switch.
+    - opentelemetry.proto.collector.logs.v1.LogsService/Export
+    - opentelemetry.proto.collector.metrics.v1.MetricsService/Export on the
+      grpc-eio / h2-eio stack so it links on the OCaml-5 [zbeio] switch.
 
-    It DECODES each request (proving the exporter framed valid OTLP protobuf) and
-    replies with an Export*ServiceResponse. A request whose first resource carries
-    the schema_url "REJECT1" comes back reporting 1 rejected record (exercising
-    the partial-success path). *)
+    It DECODES each request (proving the exporter framed valid OTLP protobuf)
+    and replies with an Export*ServiceResponse. A request whose first resource
+    carries the schema_url "REJECT1" comes back reporting 1 rejected record
+    (exercising the partial-success path). *)
 
 module LSvc = Zerobus_otlp_proto.Logs_service
 module MSvc = Zerobus_otlp_proto.Metrics_service
@@ -78,7 +78,8 @@ let grpc_server () =
     v ()
     |> add_service ~name:"opentelemetry.proto.collector.logs.v1.LogsService"
          ~service:logs_service
-    |> add_service ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
+    |> add_service
+         ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
          ~service:metrics_service)
 
 let () =

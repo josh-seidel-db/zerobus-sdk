@@ -14,5 +14,8 @@
  (enabled_if
   (>= %{ocaml_version} 5.0))
  (modules test_otlp_eio)
+ ; The collector is spawned as a separate process, so it must be built before
+ ; the test runs (otherwise `dune test` on a clean tree ENOENTs on the exe).
+ (deps otlp_collector_eio.exe)
  (libraries zerobus-otlp-eio zerobus-otlp.proto zerobus-core cohttp-eio eio
    eio_main eio.unix http uri unix alcotest))

@@ -2,11 +2,15 @@
 
     Exercises the {b real} stack the loopback mocks cannot: the TLS 1.3 + ALPN-h2
     handshake (§12.1), scoped-token acquisition (§12.2), and each of the SDK's
-    interfaces against a live Databricks workspace:
-      - gRPC streaming JSON ingest  ({!Zerobus.create_stream} -> ingest -> flush)
-      - gRPC streaming Proto ingest (DescriptorProto for {{id:int64; name:string}})
-      - REST insert                 ({!Zerobus_rest.insert})
-      - OTLP logs export            ({!Zerobus_otlp.export_logs})
+    interfaces against a live Databricks workspace, across {b both} of the SDK's
+    authentication mechanisms:
+      - gRPC streaming JSON / Proto / Arrow ingest — built-in scoped OAuth
+        ({!Zerobus.create_stream} -> ingest -> flush)
+      - gRPC streaming JSON / Proto ingest — caller-supplied bearer headers
+        ({!Zerobus.create_stream_with_headers}, bearer minted via
+        {!Zerobus_core.Config.oauth_token_request_body})
+      - REST insert                 ({!Zerobus_rest.insert}, built-in OAuth)
+      - OTLP logs export            ({!Zerobus_otlp.export_logs}, built-in OAuth)
 
     {2 Gating}
 
@@ -39,8 +43,7 @@ let ( let* ) = Lwt.bind
 let n_rows = 5
 
 (* --- env gating --- *)
-let getenv_opt k =
-  match Sys.getenv_opt k with Some "" -> None | v -> v
+let getenv_opt k = match Sys.getenv_opt k with Some "" -> None | v -> v
 
 type cfg = {
   workspace_url : string;
@@ -92,8 +95,8 @@ let descriptor_bytes () : bytes =
       ~type_:D.Type_int64 ()
   in
   let f_name =
-    D.make_field_descriptor_proto ~name:"name" ~number:2l ~label:D.Label_optional
-      ~type_:D.Type_string ()
+    D.make_field_descriptor_proto ~name:"name" ~number:2l
+      ~label:D.Label_optional ~type_:D.Type_string ()
   in
   let msg = D.make_descriptor_proto ~name:"Record" ~field:[ f_id; f_name ] () in
   let e = Pbrt.Encoder.create () in
@@ -118,14 +121,102 @@ let arrow_schema () : bytes =
   | Error e -> failwith ("arrow schema_message: " ^ e)
 
 let arrow_row (i : int) : bytes =
-  match Zerobus_arrow.encode [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ] with
+  match
+    Zerobus_arrow.encode
+      [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ]
+  with
   | Ok ipc -> ipc
   | Error e -> failwith ("arrow encode: " ^ e)
 
-(* --- gRPC streaming ingest (JSON or Proto) --- *)
+(* --- standalone token mint (for the bring-your-own-headers auth pathway) ---
+   The built-in-OAuth path (create_stream) mints internally; to exercise the
+   *custom-headers* path (create_stream_with_headers) we mint a table-scoped
+   bearer here — the same client-credentials grant, via the shared
+   Config.oauth_token_request_body — and supply it as the [authorization] header.
+   This proves the second, caller-driven authentication mechanism end to end. *)
+let mint_bearer (c : cfg) ~table : (string, Zerobus_core.Error.t) result Lwt.t =
+  match Zerobus_core.Config.workspace_id_of_url c.workspace_url with
+  | Error e -> Lwt.return (Error e)
+  | Ok workspace_id -> (
+      match
+        Zerobus_core.Config.oauth_token_request_body ~workspace_id ~table
+      with
+      | Error e -> Lwt.return (Error e)
+      | Ok body ->
+          let token_url = c.workspace_url ^ "/oidc/v1/token" in
+          let basic =
+            Base64.encode_string (c.client_id ^ ":" ^ c.client_secret)
+          in
+          let headers =
+            Cohttp.Header.of_list
+              [
+                ("Content-Type", "application/x-www-form-urlencoded");
+                ("Authorization", "Basic " ^ basic);
+              ]
+          in
+          Lwt.catch
+            (fun () ->
+              let* resp, resp_body =
+                Cohttp_lwt_unix.Client.post ~headers
+                  ~body:(Cohttp_lwt.Body.of_string body)
+                  (Uri.of_string token_url)
+              in
+              let status =
+                Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+              in
+              let* resp_str = Cohttp_lwt.Body.to_string resp_body in
+              if status < 200 || status >= 300 then
+                Lwt.return
+                  (Error
+                     (Zerobus_core.Error.Auth_error
+                        (Printf.sprintf "token endpoint HTTP %d" status)))
+              else
+                match Yojson.Safe.from_string resp_str with
+                | `Assoc l -> (
+                    match List.assoc_opt "access_token" l with
+                    | Some (`String tok) -> Lwt.return (Ok tok)
+                    | _ ->
+                        Lwt.return
+                          (Error
+                             (Zerobus_core.Error.Auth_error
+                                "no access_token in token response")))
+                | _ ->
+                    Lwt.return
+                      (Error
+                         (Zerobus_core.Error.Auth_error
+                            "malformed token response")))
+            (fun exn ->
+              Lwt.return
+                (Error
+                   (Zerobus_core.Error.Transport_error (Printexc.to_string exn))))
+      )
+
+(* Shared loop-then-flush driver: queue all rows, wait once, close. *)
+let drive_stream stream ~mk_row : (unit, Zerobus_core.Error.t) result Lwt.t =
+  let* last =
+    Lwt_list.fold_left_s
+      (fun acc i ->
+        match acc with
+        | Error _ -> Lwt.return acc
+        | Ok _ ->
+            let* r = Zerobus.ingest stream (mk_row i) in
+            Lwt.return (Result.map (fun o -> Some o) r))
+      (Ok None) (List.init n_rows Fun.id)
+  in
+  let* flush_r =
+    match last with
+    | Error e -> Lwt.return (Error e)
+    | Ok _ -> Zerobus.flush stream
+  in
+  let* _ = Zerobus.close stream in
+  Lwt.return flush_r
+
+(* --- gRPC streaming ingest, BUILT-IN OAuth (create_stream, JSON or Proto) --- *)
 let grpc_ingest (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
     (unit, Zerobus_core.Error.t) result Lwt.t =
-  let* client_r = Zerobus.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url () in
+  let* client_r =
+    Zerobus.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  in
   match client_r with
   | Error e -> Lwt.return (Error e)
   | Ok client -> (
@@ -137,24 +228,39 @@ let grpc_ingest (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
       in
       match stream_r with
       | Error e -> Lwt.return (Error e)
-      | Ok stream ->
-          (* loop-then-flush: queue all rows, then wait once at the end *)
-          let* last =
-            Lwt_list.fold_left_s
-              (fun acc i ->
-                match acc with
-                | Error _ -> Lwt.return acc
-                | Ok _ ->
-                    let* r = Zerobus.ingest stream (mk_row i) in
-                    Lwt.return (Result.map (fun o -> Some o) r))
-              (Ok None)
-              (List.init n_rows Fun.id)
-          in
-          let* flush_r =
-            match last with Error e -> Lwt.return (Error e) | Ok _ -> Zerobus.flush stream
-          in
-          let* _ = Zerobus.close stream in
-          Lwt.return flush_r)
+      | Ok stream -> drive_stream stream ~mk_row)
+
+(* --- gRPC streaming ingest, CUSTOM HEADERS auth (create_stream_with_headers) ---
+   Mints a bearer ourselves (mint_bearer) and supplies it via headers_provider,
+   proving the second authentication mechanism drives the full stream. *)
+let grpc_ingest_headers (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
+    (unit, Zerobus_core.Error.t) result Lwt.t =
+  let* client_r =
+    Zerobus.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  in
+  match client_r with
+  | Error e -> Lwt.return (Error e)
+  | Ok client -> (
+      let table = { Opt.table_name; descriptor } in
+      let options = { Opt.default_stream_options with record_type } in
+      let headers_provider () =
+        let* tok = mint_bearer c ~table:table_name in
+        Lwt.return
+          (Result.map
+             (fun tok ->
+               [
+                 ("authorization", "Bearer " ^ tok);
+                 ("x-databricks-zerobus-table-name", table_name);
+               ])
+             tok)
+      in
+      let* stream_r =
+        Zerobus.create_stream_with_headers client table ~headers_provider
+          ~options ()
+      in
+      match stream_r with
+      | Error e -> Lwt.return (Error e)
+      | Ok stream -> drive_stream stream ~mk_row)
 
 (* --- REST insert --- *)
 let rest_insert (c : cfg) : (unit, Zerobus_core.Error.t) result Lwt.t =
@@ -167,7 +273,8 @@ let rest_insert (c : cfg) : (unit, Zerobus_core.Error.t) result Lwt.t =
   | Ok client ->
       let records =
         List.init n_rows (fun i ->
-            `Assoc [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
+            `Assoc
+              [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
       in
       Zerobus_rest.insert client ~table:c.table_rest records
 
@@ -175,7 +282,8 @@ let rest_insert (c : cfg) : (unit, Zerobus_core.Error.t) result Lwt.t =
 let otlp_export (c : cfg) : (unit, Zerobus_core.Error.t) result Lwt.t =
   let* client_r =
     Zerobus_otlp.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url
-      ~table:c.table_otlp ~client_id:c.client_id ~client_secret:c.client_secret ()
+      ~table:c.table_otlp ~client_id:c.client_id ~client_secret:c.client_secret
+      ()
   in
   match client_r with
   | Error e -> Lwt.return (Error e)
@@ -202,7 +310,8 @@ let otlp_export (c : cfg) : (unit, Zerobus_core.Error.t) result Lwt.t =
 
 (* Run a live action, returning true on Ok. When unconfigured, returns true
    without touching the network (clean skip). *)
-let run_live label (f : cfg -> (unit, Zerobus_core.Error.t) result Lwt.t) : bool =
+let run_live label (f : cfg -> (unit, Zerobus_core.Error.t) result Lwt.t) : bool
+    =
   match cfg with
   | None ->
       Printf.eprintf "[%s] %s\n%!" label skip_note;
@@ -218,29 +327,56 @@ let run_live label (f : cfg -> (unit, Zerobus_core.Error.t) result Lwt.t) : bool
           false)
 
 let () =
-  Printf.eprintf "ZEROBUS OCAML — LIVE INTEGRATION SUITE (§12.4)\nconfigured: %b\n%!"
+  Printf.eprintf
+    "ZEROBUS OCAML — LIVE INTEGRATION SUITE (§12.4)\nconfigured: %b\n%!"
     (Option.is_some cfg);
   Alcotest.run "integration-lwt"
     [
       ( "live",
         [
           Alcotest.test_case "gRPC JSON ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-json" (fun c ->
-                     grpc_ingest c ~table_name:c.table_json ~record_type:Opt.Json
-                       ~descriptor:None ~mk_row:json_row)));
+                     grpc_ingest c ~table_name:c.table_json
+                       ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
           Alcotest.test_case "gRPC Proto ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-proto" (fun c ->
-                     grpc_ingest c ~table_name:c.table_proto ~record_type:Opt.Proto
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                     grpc_ingest c ~table_name:c.table_proto
+                       ~record_type:Opt.Proto
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
                        ~mk_row:proto_row)));
           Alcotest.test_case "gRPC Arrow ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-arrow" (fun c ->
-                     grpc_ingest c ~table_name:c.table_arrow ~record_type:Opt.Arrow
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (arrow_schema ())))
+                     grpc_ingest c ~table_name:c.table_arrow
+                       ~record_type:Opt.Arrow
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (arrow_schema ())))
                        ~mk_row:arrow_row)));
+          (* Second auth mechanism: caller-supplied bearer via
+             create_stream_with_headers (JSON + Proto). *)
+          Alcotest.test_case "gRPC JSON ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-json-headers" (fun c ->
+                     grpc_ingest_headers c ~table_name:c.table_json
+                       ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
+          Alcotest.test_case "gRPC Proto ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-proto-headers" (fun c ->
+                     grpc_ingest_headers c ~table_name:c.table_proto
+                       ~record_type:Opt.Proto
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                       ~mk_row:proto_row)));
           Alcotest.test_case "REST insert" `Slow (fun () ->
               Alcotest.(check bool) "ok" true (run_live "rest" rest_insert));
           Alcotest.test_case "OTLP logs export" `Slow (fun () ->

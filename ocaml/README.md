@@ -139,13 +139,18 @@ for the Eio (direct-style) shape.
 All under [`examples/`](examples/); each reads workspace credentials from the
 environment (see each file's header):
 
-| File | Shows |
-|---|---|
-| `json_loop_then_flush_lwt.ml` | **Start here** — the loop-then-flush pattern (Lwt, JSON) |
-| `ack_callback_lwt.ml` | Async durability notification via an ack callback |
-| `json_loop_then_flush_eio.ml` | The same pattern in Eio's direct style |
-| `rest_insert_lwt.ml` | One-POST-per-batch via the REST interface |
-| `otlp_export_lwt.ml` | Exporting OpenTelemetry logs via OTLP |
+Each example exists for all three runtimes (`_lwt`, `_eio`, `_async`), so you can
+copy the one matching your concurrency library:
+
+| Example | Shows | Runtimes |
+|---|---|---|
+| `json_loop_then_flush_*` | **Start here** — the loop-then-flush pattern (JSON) | Lwt, Eio, Async |
+| `ack_callback_*` | Async durability notification via an ack callback | Lwt, Eio, Async |
+| `rest_insert_*` | One-POST-per-batch via the REST interface | Lwt, Eio, Async |
+| `otlp_export_*` | Exporting OpenTelemetry logs via OTLP | Lwt, Eio, Async |
+
+(e.g. `json_loop_then_flush_lwt.ml`, `json_loop_then_flush_eio.ml`,
+`json_loop_then_flush_async.ml`.)
 
 ## Concurrency
 
@@ -176,11 +181,16 @@ dune test  test_driver_eio/ test_driver_eio_arrow/ test_rest_eio/ \
 
 The Async built-in-TLS/OAuth and Async REST/OTLP/OTEL tests
 (`test_driver_async_tls/`, `test_driver_async_oauth/`, `test_rest_async/`,
-`test_otlp_async/`, `test_otlp_otel_async/`) need a switch with `tls-async` (and, for
-the mock-server side, `cohttp-async`) on top of the 4.14 stack — see
+`test_otlp_otel_async/`) need a switch with `tls-async` (and, for the mock-server
+side, `cohttp-async`) on top of the 4.14 stack — see
 [`doc/arch/tls_async_status.md`](doc/arch/tls_async_status.md). They are `(optional)`
-and vanish otherwise, so they are not in the standard CI matrix; the shipped Async
-libraries themselves build on the plain 4.14 switch.
+and vanish on a switch lacking those deps; the shipped Async libraries themselves
+build on the plain 4.14 switch. In CI they run in a separate **non-blocking** job
+(`.github/workflows/ci-ocaml-async-bespoke.yml`) that builds the combined switch.
+`test_otlp_async/` is the one exception that stays out even there: its mock
+collector needs `Grpc_async.Server` (grpc-async 0.2.0 / async v0.16), which can't
+coexist with `tls-async` (async v0.15) on one switch — its Async OTLP coverage is
+provided by `test_otlp_otel_async/`.
 
 The env-gated live integration suite (`test_integration/`, per DESIGN §12.4) runs on
 all three runtimes against a real workspace when `DATABRICKS_HOST` /
@@ -189,6 +199,24 @@ and is a clean no-op success otherwise.
 
 (`dune build` of the whole tree only succeeds on a switch that has *both* runtime
 stacks installed; build the per-runtime directories on the matching switch.)
+
+### Formatting and docs
+
+Source is formatted with [ocamlformat](https://github.com/ocaml-ppx/ocamlformat)
+0.29.0 (`.ocamlformat`, `profile = default`; only OCaml is formatted — the `dune`
+files keep their hand-formatting). CI enforces it. Locally:
+
+```sh
+dune build @fmt            # check formatting
+dune build @fmt --auto-promote   # apply it
+```
+
+API docs build with odoc; CI compiles every doc comment (scoped per switch, since
+the Eio-only packages can't be documented alongside the Lwt ones):
+
+```sh
+dune build @doc            # then open _build/default/_doc/_html/index.html
+```
 
 ## Design
 

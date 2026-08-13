@@ -1,13 +1,14 @@
 (** Driver-level Arrow-Flight/DoPut mock server. Links REAL libarrow and decodes
-    each FlightData.data_body back to rows via {!Zerobus_arrow.decode} (so a corrupt or
-    non-Arrow body is caught), then acks the DURABLE OFFSET as a plain int64 in
-    PutResult.app_metadata — the watermark the {!Zerobus_core.Make_with_protocol}
-    driver's Flight PROTOCOL decodes. This is what lets the runtime-generic driver
-    (offset/ack/flush/recovery) run unmodified over Flight DoPut.
+    each FlightData.data_body back to rows via {!Zerobus_arrow.decode} (so a
+    corrupt or non-Arrow body is caught), then acks the DURABLE OFFSET as a
+    plain int64 in PutResult.app_metadata — the watermark the
+    {!Zerobus_core.Make_with_protocol} driver's Flight PROTOCOL decodes. This is
+    what lets the runtime-generic driver (offset/ack/flush/recovery) run
+    unmodified over Flight DoPut.
 
-    Offset in on the way (FlightData.app_metadata, decimal int64) → offset out as
-    the watermark (PutResult.app_metadata, decimal int64), monotonic per stream.
-    Separate-process topology; cleartext h2c. *)
+    Offset in on the way (FlightData.app_metadata, decimal int64) → offset out
+    as the watermark (PutResult.app_metadata, decimal int64), monotonic per
+    stream. Separate-process topology; cleartext h2c. *)
 
 module F = Zerobus_proto.Flight
 
@@ -52,7 +53,8 @@ let handle_do_put (requests : string Lwt_stream.t) (respond : string -> unit) :
     Grpc.Status.t Lwt.t =
   let open Lwt.Syntax in
   let watermark = ref (-1L) in
-  let seq = ref (-1L) in (* fallback offset if app_metadata is absent *)
+  let seq = ref (-1L) in
+  (* fallback offset if app_metadata is absent *)
   let schema = ref Bytes.empty in
   let* () =
     Lwt_stream.iter
@@ -82,7 +84,8 @@ let handle_do_put (requests : string Lwt_stream.t) (respond : string -> unit) :
                 F.make_put_result
                   ~app_metadata:
                     (Bytes.of_string
-                       (Printf.sprintf {|{"ack_up_to_offset":%Ld,"ack_up_to_records":%Ld}|}
+                       (Printf.sprintf
+                          {|{"ack_up_to_offset":%Ld,"ack_up_to_records":%Ld}|}
                           !watermark (Int64.add !watermark 1L)))
                   ()
               in
@@ -91,7 +94,8 @@ let handle_do_put (requests : string Lwt_stream.t) (respond : string -> unit) :
               let pr =
                 F.make_put_result
                   ~app_metadata:
-                    (Bytes.of_string {|{"ack_up_to_offset":-1,"ack_up_to_records":0}|})
+                    (Bytes.of_string
+                       {|{"ack_up_to_offset":-1,"ack_up_to_records":0}|})
                   ()
               in
               respond (encode_put_result pr)

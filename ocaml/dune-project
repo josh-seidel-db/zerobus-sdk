@@ -8,6 +8,12 @@
 
 (generate_opam_files true)
 
+; Auto-format OCaml sources only (via .ocamlformat). The dune files carry
+; deliberate hand-formatting + long explanatory comments, so they are left
+; out of the `@fmt` gate.
+(formatting
+ (enabled_for ocaml))
+
 (name zerobus)
 (source
  (github databricks/zerobus-sdk))

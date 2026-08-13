@@ -6,17 +6,18 @@
     This is the wire-compatibility proof the plain [test_otlp] mock cannot give:
     there, both sides use our own [Zerobus_otlp_proto], so a symmetric-codec bug
     would pass. Here the request is encoded by {!Zerobus_otlp} (our protos) and
-    decoded by [Opentelemetry_proto] (the independent, upstream-generated protos).
-    If the canonical decoder reads our bytes correctly — right log-record count,
-    severity, body — our OTLP framing is genuinely interoperable.
+    decoded by [Opentelemetry_proto] (the independent, upstream-generated
+    protos). If the canonical decoder reads our bytes correctly — right
+    log-record count, severity, body — our OTLP framing is genuinely
+    interoperable.
 
     The response is likewise built + encoded with the canonical types, so our
-    exporter's decoder is validated against canonical-encoded bytes too. A request
-    whose first resource carries schema_url "REJECT1" comes back reporting 1
-    rejected record (the partial-success path).
+    exporter's decoder is validated against canonical-encoded bytes too. A
+    request whose first resource carries schema_url "REJECT1" comes back
+    reporting 1 rejected record (the partial-success path).
 
-    Received counts are written to $ZEROBUS_OTEL_COLLECTOR_LOG (if set) for durable
-    round-trip evidence. *)
+    Received counts are written to $ZEROBUS_OTEL_COLLECTOR_LOG (if set) for
+    durable round-trip evidence. *)
 
 module LSvc = Opentelemetry_proto.Logs_service
 module MSvc = Opentelemetry_proto.Metrics_service
@@ -92,8 +93,8 @@ let logs_export : Grpc_lwt.Server.Rpc.unary =
     | [] -> ""
   in
   log_line
-    (Printf.sprintf "LogsService/Export canonical-decoded %d record(s) sev0=%s%s"
-       n first_sev
+    (Printf.sprintf
+       "LogsService/Export canonical-decoded %d record(s) sev0=%s%s" n first_sev
        (if reject then " (REJECT1)" else ""));
   let resp =
     if reject then
@@ -170,7 +171,8 @@ let () =
      in
      let handler =
        H2_lwt_unix.Server.create_connection_handler ?config:None
-         ~request_handler:(fun _ reqd -> Grpc_lwt.Server.handle_request server reqd)
+         ~request_handler:(fun _ reqd ->
+           Grpc_lwt.Server.handle_request server reqd)
          ~error_handler:(fun _ ?request:_ _ _ -> ())
      in
      Printf.printf "READY %d\n%!" actual_port;

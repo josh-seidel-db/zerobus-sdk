@@ -9,10 +9,7 @@ type descriptor = bytes
 let descriptor_of_bytes b = b
 let descriptor_to_bytes b = b
 
-type table_properties = {
-  table_name : string;
-  descriptor : descriptor option;
-}
+type table_properties = { table_name : string; descriptor : descriptor option }
 
 type ack_callback = {
   on_ack : offset -> unit;
@@ -23,20 +20,22 @@ type ack_callback = {
    ceiling). NEVER drops records — that would be silent data loss on recovery. *)
 type overflow_policy =
   | Block
-      (** Backpressure: [ingest] waits until the ack-reader drains the buffer below
-          the bound, then proceeds. Mirrors the Rust/Go semaphore. Default. *)
+      (** Backpressure: [ingest] waits until the ack-reader drains the buffer
+          below the bound, then proceeds. Mirrors the Rust/Go semaphore.
+          Default. *)
   | Fail
-      (** [ingest] returns [Error (Backpressure ...)] instead of blocking, so the
-          caller decides (retry later, slow down, drop deliberately). The buffer is
-          never silently truncated. *)
+      (** [ingest] returns [Error (Backpressure ...)] instead of blocking, so
+          the caller decides (retry later, slow down, drop deliberately). The
+          buffer is never silently truncated. *)
 
 type stream_options = {
   record_type : record_type;
   max_inflight_requests : int;
   overflow_policy : overflow_policy;
   max_inflight_bytes : int option;
-      (** Byte ceiling on the un-acked replay buffer. [None] = derive a smart budget
-          from the process's available memory at stream open (see below). *)
+      (** Byte ceiling on the un-acked replay buffer. [None] = derive a smart
+          budget from the process's available memory at stream open (see below).
+      *)
   recovery : bool;
   recovery_timeout_ms : int;
   recovery_backoff_ms : int;

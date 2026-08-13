@@ -21,8 +21,7 @@ module D = Zerobus_proto.Descriptor
 let n_rows = 5
 
 (* --- env gating --- *)
-let getenv_opt k =
-  match Sys.getenv k with Some "" -> None | v -> v
+let getenv_opt k = match Sys.getenv k with Some "" -> None | v -> v
 
 type cfg = {
   workspace_url : string;
@@ -73,8 +72,8 @@ let descriptor_bytes () : bytes =
       ~type_:D.Type_int64 ()
   in
   let f_name =
-    D.make_field_descriptor_proto ~name:"name" ~number:2l ~label:D.Label_optional
-      ~type_:D.Type_string ()
+    D.make_field_descriptor_proto ~name:"name" ~number:2l
+      ~label:D.Label_optional ~type_:D.Type_string ()
   in
   let msg = D.make_descriptor_proto ~name:"Record" ~field:[ f_id; f_name ] () in
   let e = Pbrt.Encoder.create () in
@@ -99,14 +98,19 @@ let arrow_schema () : bytes =
   | Error e -> failwith ("arrow schema_message: " ^ e)
 
 let arrow_row (i : int) : bytes =
-  match Zerobus_arrow.encode [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ] with
+  match
+    Zerobus_arrow.encode
+      [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ]
+  with
   | Ok ipc -> ipc
   | Error e -> failwith ("arrow encode: " ^ e)
 
 (* --- gRPC streaming ingest (JSON or Proto) via the Async OAuth façade --- *)
 let grpc_ingest (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
     (unit, Zerobus_core.Error.t) result Deferred.t =
-  match%bind Zerobus_async.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url () with
+  match%bind
+    Zerobus_async.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  with
   | Error e -> return (Error e)
   | Ok client ->
       let table = { Opt.table_name; descriptor } in
@@ -128,25 +132,70 @@ let grpc_ingest (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
       in
       Result.join r
 
+(* --- gRPC streaming ingest, CUSTOM HEADERS auth (with_stream + provider) ---
+   Mints a bearer via the public Zerobus_async.mint_token, then supplies it
+   through the headers_provider — exercising the second, caller-driven
+   authentication mechanism end to end. *)
+let grpc_ingest_headers (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
+    (unit, Zerobus_core.Error.t) result Deferred.t =
+  match%bind
+    Zerobus_async.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  with
+  | Error e -> return (Error e)
+  | Ok client ->
+      let table = { Opt.table_name; descriptor } in
+      let options = { Opt.default_stream_options with record_type } in
+      let headers_provider () =
+        match%map
+          Zerobus_async.mint_token ~client ~table:table_name
+            ~client_id:c.client_id ~client_secret:c.client_secret
+        with
+        | Error e -> Error e
+        | Ok token ->
+            Ok
+              [
+                ("authorization", "Bearer " ^ token);
+                ("x-databricks-zerobus-table-name", table_name);
+              ]
+      in
+      let%map r =
+        Zerobus_async.with_stream client table ~headers_provider ~options
+          (fun stream ->
+            let rec loop i last =
+              if i >= n_rows then return last
+              else
+                match%bind Zerobus_async.ingest stream (mk_row i) with
+                | Error _ as e -> return e
+                | Ok o -> loop (i + 1) (Ok o)
+            in
+            match%bind loop 0 (Ok (Opt.offset_of_int64 0L)) with
+            | Error e -> return (Error e)
+            | Ok _ -> Zerobus_async.flush stream)
+      in
+      Result.join r
+
 (* --- REST insert --- *)
 let rest_insert (c : cfg) : (unit, Zerobus_core.Error.t) result Deferred.t =
   match
-    Zerobus_rest_async.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url
-      ~client_id:c.client_id ~client_secret:c.client_secret ()
+    Zerobus_rest_async.create ~endpoint:c.endpoint
+      ~workspace_url:c.workspace_url ~client_id:c.client_id
+      ~client_secret:c.client_secret ()
   with
   | Error e -> return (Error e)
   | Ok client ->
       let records =
         List.init n_rows ~f:(fun i ->
-            `Assoc [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
+            `Assoc
+              [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
       in
       Zerobus_rest_async.insert client ~table:c.table_rest records
 
 (* --- OTLP logs export --- *)
 let otlp_export (c : cfg) : (unit, Zerobus_core.Error.t) result Deferred.t =
   match
-    Zerobus_otlp_async.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url
-      ~table:c.table_otlp ~client_id:c.client_id ~client_secret:c.client_secret ()
+    Zerobus_otlp_async.create ~endpoint:c.endpoint
+      ~workspace_url:c.workspace_url ~table:c.table_otlp ~client_id:c.client_id
+      ~client_secret:c.client_secret ()
   with
   | Error e -> return (Error e)
   | Ok client ->
@@ -172,7 +221,8 @@ let otlp_export (c : cfg) : (unit, Zerobus_core.Error.t) result Deferred.t =
 
 (* Run a live action, returning true on Ok. When unconfigured, returns true
    without touching the network (clean skip). *)
-let run_live label (f : cfg -> (unit, Zerobus_core.Error.t) result Deferred.t) : bool =
+let run_live label (f : cfg -> (unit, Zerobus_core.Error.t) result Deferred.t) :
+    bool =
   match cfg with
   | None ->
       Core.eprintf "[%s] %s\n%!" label skip_note;
@@ -196,22 +246,47 @@ let () =
       ( "live",
         [
           Alcotest.test_case "gRPC JSON ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-json" (fun c ->
-                     grpc_ingest c ~table_name:c.table_json ~record_type:Opt.Json
-                       ~descriptor:None ~mk_row:json_row)));
+                     grpc_ingest c ~table_name:c.table_json
+                       ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
           Alcotest.test_case "gRPC Proto ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-proto" (fun c ->
-                     grpc_ingest c ~table_name:c.table_proto ~record_type:Opt.Proto
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                     grpc_ingest c ~table_name:c.table_proto
+                       ~record_type:Opt.Proto
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
                        ~mk_row:proto_row)));
           Alcotest.test_case "gRPC Arrow ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-arrow" (fun c ->
-                     grpc_ingest c ~table_name:c.table_arrow ~record_type:Opt.Arrow
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (arrow_schema ())))
+                     grpc_ingest c ~table_name:c.table_arrow
+                       ~record_type:Opt.Arrow
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (arrow_schema ())))
                        ~mk_row:arrow_row)));
+          (* Second auth mechanism: caller-supplied bearer via with_stream. *)
+          Alcotest.test_case "gRPC JSON ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-json-headers" (fun c ->
+                     grpc_ingest_headers c ~table_name:c.table_json
+                       ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
+          Alcotest.test_case "gRPC Proto ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-proto-headers" (fun c ->
+                     grpc_ingest_headers c ~table_name:c.table_proto
+                       ~record_type:Opt.Proto
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                       ~mk_row:proto_row)));
           Alcotest.test_case "REST insert" `Slow (fun () ->
               Alcotest.(check bool) "ok" true (run_live "rest" rest_insert));
           Alcotest.test_case "OTLP logs export" `Slow (fun () ->

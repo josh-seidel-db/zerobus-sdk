@@ -7,8 +7,9 @@
 ; uses — for cleartext http:// it connects over plain TCP, but the real backend
 ; must be present to be exercised). The dir VANISHES on switches lacking either
 ; (e.g. the canonical fl414) instead of erroring. It lights up on a combined
-; tls-async + cohttp-async switch. NOT in CI. The live path is validated directly
-; by test_integration/ against a real workspace.
+; tls-async + cohttp-async switch, and runs in the NON-BLOCKING bespoke-switch CI
+; job (.github/workflows/ci-ocaml-async-bespoke.yml). The live path is also
+; validated directly by test_integration/ against a real workspace.
 (executable
  (name test_rest_async)
  (modules test_rest_async)

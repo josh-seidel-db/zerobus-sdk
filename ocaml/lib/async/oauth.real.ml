@@ -1,20 +1,21 @@
 (** Real OAuth token-endpoint HTTP backend for the Async runtime — used when
     [tls-async] (+ its deps) is installed (dune [select] picks this over
     [oauth.dummy.ml]). Does the client-credentials POST to
-    [<workspace_url>/oidc/v1/token] and returns the parsed [(access_token,
-    expiry)]; the façade ({!Zerobus_async}) owns the token cache + orchestration.
+    [<workspace_url>/oidc/v1/token] and returns the parsed
+    [(access_token, expiry)]; the façade ({!Zerobus_async}) owns the token cache
+    \+ orchestration.
 
     {2 Why tls-async and not cohttp-async}
 
     The token POST is plain HTTPS/1.1, but it must use {b ocaml-tls} — the same
-    pure-OCaml TLS the gRPC transport uses ([tls_connect.real.ml]) — not OpenSSL.
-    [cohttp-async] routes HTTPS through [conduit-async], whose only TLS backend is
-    [async_ssl] (OpenSSL via [conf-libssl]); the SDK deliberately avoids that C
-    dependency (DESIGN §12.5). So this backend connects with [Tls_async.connect]
-    (system trust store + peer-name verification) and speaks a minimal HTTP/1.1
-    request/response by hand — exactly the pure-TLS posture of the Lwt reference
-    (whose [conduit-lwt-unix] uses [tls-lwt]) and the Eio façade (which threads
-    [tls-eio]). No cohttp/conduit/OpenSSL on this path.
+    pure-OCaml TLS the gRPC transport uses ([tls_connect.real.ml]) — not
+    OpenSSL. [cohttp-async] routes HTTPS through [conduit-async], whose only TLS
+    backend is [async_ssl] (OpenSSL via [conf-libssl]); the SDK deliberately
+    avoids that C dependency (DESIGN §12.5). So this backend connects with
+    [Tls_async.connect] (system trust store + peer-name verification) and speaks
+    a minimal HTTP/1.1 request/response by hand — exactly the pure-TLS posture
+    of the Lwt reference (whose [conduit-lwt-unix] uses [tls-lwt]) and the Eio
+    façade (which threads [tls-eio]). No cohttp/conduit/OpenSSL on this path.
 
     Kept behind the [select] so the Async package does NOT force these deps on
     switches that only want the gRPC transport — like the tls-async live-TLS
@@ -48,7 +49,8 @@ let parse_url (u : string) : url option =
       in
       let host, port =
         match String.lsplit2 authority ~on:':' with
-        | Some (h, p) -> (h, try Int.of_string p with _ -> if tls then 443 else 80)
+        | Some (h, p) ->
+            (h, try Int.of_string p with _ -> if tls then 443 else 80)
         | None -> (authority, if tls then 443 else 80)
       in
       Some { tls; host; port; path }
@@ -74,11 +76,11 @@ let parse_response (raw : string) : (int * string) option =
   | None -> None
   | Some i ->
       let head = String.sub raw ~pos:0 ~len:i in
-      let body =
-        String.sub raw ~pos:(i + 4) ~len:(String.length raw - i - 4)
-      in
+      let body = String.sub raw ~pos:(i + 4) ~len:(String.length raw - i - 4) in
       let status_line =
-        match String.lsplit2 head ~on:'\r' with Some (s, _) -> s | None -> head
+        match String.lsplit2 head ~on:'\r' with
+        | Some (s, _) -> s
+        | None -> head
       in
       let code =
         match String.split status_line ~on:' ' with
@@ -98,7 +100,9 @@ let https_post ~url:(u : string) ~headers ~body :
   match parse_url u with
   | None -> return (Error (Failure ("bad URL: " ^ u)))
   | Some url ->
-      let req = http_post_request ~host:url.host ~path:url.path ~headers ~body in
+      let req =
+        http_post_request ~host:url.host ~path:url.path ~headers ~body
+      in
       let exchange reader writer =
         Writer.write writer req;
         let%bind () = Writer.flushed writer in
@@ -110,7 +114,7 @@ let https_post ~url:(u : string) ~headers ~body :
         | None -> failwith "malformed HTTP response"
       in
       Monitor.try_with ~run:`Now (fun () ->
-          if url.tls then (
+          if url.tls then
             (* Pure-OCaml TLS, system anchors + peer name; no ALPN needed. *)
             let authenticator =
               match Ca_certs.authenticator () with
@@ -119,7 +123,10 @@ let https_post ~url:(u : string) ~headers ~body :
             in
             let peer_name =
               match Domain_name.of_string url.host with
-              | Ok d -> ( match Domain_name.host d with Ok h -> Some h | Error _ -> None)
+              | Ok d -> (
+                  match Domain_name.host d with
+                  | Ok h -> Some h
+                  | Error _ -> None)
               | Error _ -> None
             in
             let cfg = Tls.Config.client ~authenticator ?peer_name () in
@@ -129,7 +136,7 @@ let https_post ~url:(u : string) ~headers ~body :
             in
             match%bind Tls_async.connect cfg where ~host:peer_name with
             | Error e -> failwith (Error.to_string_hum e)
-            | Ok (_session, reader, writer) -> exchange reader writer)
+            | Ok (_session, reader, writer) -> exchange reader writer
           else
             let where =
               Tcp.Where_to_connect.of_host_and_port

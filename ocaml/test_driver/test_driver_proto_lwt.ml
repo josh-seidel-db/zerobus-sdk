@@ -25,7 +25,9 @@ let server_exe () =
 let with_server (f : unit -> 'a Lwt.t) : 'a Lwt.t =
   let exe = server_exe () in
   let stdout_r, stdout_w = Unix.pipe () in
-  let pid = Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr in
+  let pid =
+    Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr
+  in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
   (try
@@ -43,27 +45,19 @@ let with_server (f : unit -> 'a Lwt.t) : 'a Lwt.t =
 let make_descriptor_proto () : Proto.Descriptor.descriptor_proto =
   (* Field 1: id (int64, optional) *)
   let field_id =
-    Proto.Descriptor.make_field_descriptor_proto
-      ~name:"id"
-      ~number:1l
-      ~label:Proto.Descriptor.Label_optional
-      ~type_:Proto.Descriptor.Type_int64
+    Proto.Descriptor.make_field_descriptor_proto ~name:"id" ~number:1l
+      ~label:Proto.Descriptor.Label_optional ~type_:Proto.Descriptor.Type_int64
       ()
   in
   (* Field 2: name (string, optional) *)
   let field_name =
-    Proto.Descriptor.make_field_descriptor_proto
-      ~name:"name"
-      ~number:2l
-      ~label:Proto.Descriptor.Label_optional
-      ~type_:Proto.Descriptor.Type_string
+    Proto.Descriptor.make_field_descriptor_proto ~name:"name" ~number:2l
+      ~label:Proto.Descriptor.Label_optional ~type_:Proto.Descriptor.Type_string
       ()
   in
   (* Message: TestRecord with two fields *)
-  Proto.Descriptor.make_descriptor_proto
-    ~name:"TestRecord"
-    ~field:[field_id; field_name]
-    ()
+  Proto.Descriptor.make_descriptor_proto ~name:"TestRecord"
+    ~field:[ field_id; field_name ] ()
 
 (* --- Encode the descriptor to bytes --- *)
 let encode_descriptor (desc : Proto.Descriptor.descriptor_proto) : bytes =
@@ -108,8 +102,13 @@ let run_driver () : result Lwt.t =
       in
       match stream_r with
       | Error e ->
-          Lwt.return { acked_last = false; issued = 0; err = Some (Zerobus_core.Error.to_string e) }
-      | Ok stream ->
+          Lwt.return
+            {
+              acked_last = false;
+              issued = 0;
+              err = Some (Zerobus_core.Error.to_string e);
+            }
+      | Ok stream -> (
           (* loop-then-flush: queue N records, do NOT wait per record *)
           let rec loop i last =
             if i >= n_records then Lwt.return (Ok last)
@@ -121,25 +120,32 @@ let run_driver () : result Lwt.t =
               | Error _ as e -> Lwt.return e
           in
           let* ingested = loop 0 None in
-          (match ingested with
-           | Error e ->
-               Lwt.return
-                 { acked_last = false; issued = 0; err = Some (Zerobus_core.Error.to_string e) }
-           | Ok last_off ->
-               (* flush once — wait for all pending acks *)
-               let* flush_r = Z.flush stream in
-               let* _ = Z.close stream in
-               let acked_last =
-                 match (flush_r, last_off) with
-                 | Ok (), Some _ -> true
-                 | _ -> false
-               in
-               Lwt.return
-                 {
-                   acked_last;
-                   issued = n_records;
-                   err = (match flush_r with Error e -> Some (Zerobus_core.Error.to_string e) | Ok () -> None);
-                 }))
+          match ingested with
+          | Error e ->
+              Lwt.return
+                {
+                  acked_last = false;
+                  issued = 0;
+                  err = Some (Zerobus_core.Error.to_string e);
+                }
+          | Ok last_off ->
+              (* flush once — wait for all pending acks *)
+              let* flush_r = Z.flush stream in
+              let* _ = Z.close stream in
+              let acked_last =
+                match (flush_r, last_off) with
+                | Ok (), Some _ -> true
+                | _ -> false
+              in
+              Lwt.return
+                {
+                  acked_last;
+                  issued = n_records;
+                  err =
+                    (match flush_r with
+                    | Error e -> Some (Zerobus_core.Error.to_string e)
+                    | Ok () -> None);
+                }))
 
 let result =
   lazy
@@ -151,7 +157,8 @@ let result =
                ocaml_version : %s\n\
                records_issued: %d\n\
                flush_all_acked: %b\n\
-               error         : %s\n%!"
+               error         : %s\n\
+               %!"
               Sys.ocaml_version r.issued r.acked_last
               (match r.err with Some e -> e | None -> "none");
             Lwt.return r)))

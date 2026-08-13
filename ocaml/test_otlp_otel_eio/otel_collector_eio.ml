@@ -1,13 +1,14 @@
-(** Cross-implementation OTLP mock collector (Eio) — decodes our exporter's Export
-    requests with the {b canonical} upstream [opentelemetry.proto] wire types, NOT
-    our vendored [Zerobus_otlp_proto]. The Eio counterpart of
-    test_otlp_otel/otel_collector_lwt.ml, on the grpc-eio / h2-eio stack. Standalone
-    process, cleartext h2c on loopback.
+(** Cross-implementation OTLP mock collector (Eio) — decodes our exporter's
+    Export requests with the {b canonical} upstream [opentelemetry.proto] wire
+    types, NOT our vendored [Zerobus_otlp_proto]. The Eio counterpart of
+    test_otlp_otel/otel_collector_lwt.ml, on the grpc-eio / h2-eio stack.
+    Standalone process, cleartext h2c on loopback.
 
-    Proves genuine OTLP wire-compatibility for the Eio exporter: request encoded by
-    {!Zerobus_otlp_eio} (our protos), decoded here by the independent canonical
-    protos. A first-resource schema_url of "REJECT1" drives the partial-success
-    path (1 rejected). Decode counts go to $ZEROBUS_OTEL_COLLECTOR_LOG. *)
+    Proves genuine OTLP wire-compatibility for the Eio exporter: request encoded
+    by {!Zerobus_otlp_eio} (our protos), decoded here by the independent
+    canonical protos. A first-resource schema_url of "REJECT1" drives the
+    partial-success path (1 rejected). Decode counts go to
+    $ZEROBUS_OTEL_COLLECTOR_LOG. *)
 
 module LSvc = Opentelemetry_proto.Logs_service
 module MSvc = Opentelemetry_proto.Metrics_service
@@ -48,13 +49,15 @@ let logs_export : Grpc_eio.Server.Rpc.unary =
     | rl :: _ -> (
         match rl.OLogs.scope_logs with
         | sl :: _ -> (
-            match sl.OLogs.log_records with lr :: _ -> lr.OLogs.severity_text | [] -> "")
+            match sl.OLogs.log_records with
+            | lr :: _ -> lr.OLogs.severity_text
+            | [] -> "")
         | [] -> "")
     | [] -> ""
   in
   log_line
-    (Printf.sprintf "LogsService/Export canonical-decoded %d record(s) sev0=%s%s" n
-       first_sev
+    (Printf.sprintf
+       "LogsService/Export canonical-decoded %d record(s) sev0=%s%s" n first_sev
        (if reject then " (REJECT1)" else ""));
   let resp =
     if reject then
@@ -109,7 +112,8 @@ let grpc_server () =
     v ()
     |> add_service ~name:"opentelemetry.proto.collector.logs.v1.LogsService"
          ~service:logs_service
-    |> add_service ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
+    |> add_service
+         ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
          ~service:metrics_service)
 
 let () =

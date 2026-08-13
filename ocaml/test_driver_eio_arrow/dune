@@ -16,5 +16,8 @@
  (enabled_if
   (>= %{ocaml_version} 5.0))
  (modules test_arrow_eio)
+ ; The Flight mock is spawned as a separate process, so it must be built before
+ ; the test runs (otherwise `dune test` on a clean tree ENOENTs on the exe).
+ (deps flight_arrow_server_eio.exe)
  (libraries zerobus-eio zerobus-core zerobus-core.proto zerobus-arrow eio
    eio_main eio.unix unix alcotest))

@@ -1,13 +1,13 @@
 (** Mock OTLP collector for the Phase 7d exporter test — a standalone process
-    (the proven separate-process topology), cleartext h2c on loopback. Speaks the
-    REAL vendored OpenTelemetry collector protos: two unary [Export] RPCs
-      - opentelemetry.proto.collector.logs.v1.LogsService/Export
-      - opentelemetry.proto.collector.metrics.v1.MetricsService/Export
+    (the proven separate-process topology), cleartext h2c on loopback. Speaks
+    the REAL vendored OpenTelemetry collector protos: two unary [Export] RPCs
+    - opentelemetry.proto.collector.logs.v1.LogsService/Export
+    - opentelemetry.proto.collector.metrics.v1.MetricsService/Export
 
     It DECODES each request (proving the exporter framed valid OTLP protobuf),
     counts the log records / data points it received, and replies with an
-    Export*ServiceResponse. To exercise the partial-success path, a request whose
-    first resource carries the schema_url "REJECT1" comes back reporting 1
+    Export*ServiceResponse. To exercise the partial-success path, a request
+    whose first resource carries the schema_url "REJECT1" comes back reporting 1
     rejected record.
 
     The received counts are echoed on stderr so the test can eyeball them; the
@@ -27,9 +27,7 @@ let log_line s =
   match Sys.getenv_opt "ZEROBUS_OTLP_COLLECTOR_LOG" with
   | Some path -> (
       try
-        let oc =
-          open_out_gen [ Open_append; Open_creat ] 0o644 path
-        in
+        let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
         output_string oc (s ^ "\n");
         close_out oc
       with _ -> ())
@@ -129,8 +127,7 @@ let grpc_server () =
   in
   Grpc_lwt.Server.(
     v ()
-    |> add_service
-         ~name:"opentelemetry.proto.collector.logs.v1.LogsService"
+    |> add_service ~name:"opentelemetry.proto.collector.logs.v1.LogsService"
          ~service:logs_service
     |> add_service
          ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"

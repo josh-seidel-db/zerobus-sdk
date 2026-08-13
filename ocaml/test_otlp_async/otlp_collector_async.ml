@@ -1,15 +1,15 @@
 (** Mock OTLP collector for the Async exporter test — a standalone process (the
     proven separate-process topology), cleartext h2c on loopback. The Async
     counterpart of test_otlp/otlp_collector.ml: same two unary [Export] RPCs
-      - opentelemetry.proto.collector.logs.v1.LogsService/Export
-      - opentelemetry.proto.collector.metrics.v1.MetricsService/Export
-    on the grpc-async / h2-async stack (standard on fl414, like the async driver
-    mock).
+    - opentelemetry.proto.collector.logs.v1.LogsService/Export
+    - opentelemetry.proto.collector.metrics.v1.MetricsService/Export on the
+      grpc-async / h2-async stack (standard on fl414, like the async driver
+      mock).
 
-    It DECODES each request (proving the exporter framed valid OTLP protobuf) and
-    replies with an Export*ServiceResponse. A request whose first resource carries
-    the schema_url "REJECT1" comes back reporting 1 rejected record (exercising
-    the partial-success path). *)
+    It DECODES each request (proving the exporter framed valid OTLP protobuf)
+    and replies with an Export*ServiceResponse. A request whose first resource
+    carries the schema_url "REJECT1" comes back reporting 1 rejected record
+    (exercising the partial-success path). *)
 
 open! Core
 open! Async
@@ -74,23 +74,28 @@ let grpc_server () =
   let metrics_service =
     Grpc_async.Server.Service.(
       v ()
-      |> add_rpc ~name:"Export" ~rpc:(Grpc_async.Server.Rpc.Unary metrics_export)
+      |> add_rpc ~name:"Export"
+           ~rpc:(Grpc_async.Server.Rpc.Unary metrics_export)
       |> handle_request)
   in
   Grpc_async.Server.(
     v ()
     |> add_service ~name:"opentelemetry.proto.collector.logs.v1.LogsService"
          ~service:logs_service
-    |> add_service ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
+    |> add_service
+         ~name:"opentelemetry.proto.collector.metrics.v1.MetricsService"
          ~service:metrics_service)
 
 let main () =
   let requested_port =
-    if Array.length (Sys.get_argv ()) > 1 then Int.of_string (Sys.get_argv ()).(1)
+    if Array.length (Sys.get_argv ()) > 1 then
+      Int.of_string (Sys.get_argv ()).(1)
     else 0
   in
   let server = grpc_server () in
-  let request_handler _addr reqd = Grpc_async.Server.handle_request server reqd in
+  let request_handler _addr reqd =
+    Grpc_async.Server.handle_request server reqd
+  in
   let error_handler _addr ?request:_ _err start_response =
     let body = start_response H2.Headers.empty in
     H2.Body.Writer.close body

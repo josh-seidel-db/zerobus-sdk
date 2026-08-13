@@ -69,8 +69,8 @@ let descriptor_bytes () : bytes =
       ~type_:D.Type_int64 ()
   in
   let f_name =
-    D.make_field_descriptor_proto ~name:"name" ~number:2l ~label:D.Label_optional
-      ~type_:D.Type_string ()
+    D.make_field_descriptor_proto ~name:"name" ~number:2l
+      ~label:D.Label_optional ~type_:D.Type_string ()
   in
   let msg = D.make_descriptor_proto ~name:"Record" ~field:[ f_id; f_name ] () in
   let e = Pbrt.Encoder.create () in
@@ -95,14 +95,19 @@ let arrow_schema () : bytes =
   | Error e -> failwith ("arrow schema_message: " ^ e)
 
 let arrow_row (i : int) : bytes =
-  match Zerobus_arrow.encode [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ] with
+  match
+    Zerobus_arrow.encode
+      [ { Zerobus_arrow.id = i; name = Printf.sprintf "row-%d" i } ]
+  with
   | Ok ipc -> ipc
   | Error e -> failwith ("arrow encode: " ^ e)
 
 (* --- gRPC streaming ingest (JSON or Proto) via the Eio OAuth façade --- *)
-let grpc_ingest ~env ~sw (c : cfg) ~table_name ~record_type ~descriptor ~mk_row :
-    (unit, Zerobus_core.Error.t) result =
-  match Zerobus_eio.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url () with
+let grpc_ingest ~env ~sw (c : cfg) ~table_name ~record_type ~descriptor ~mk_row
+    : (unit, Zerobus_core.Error.t) result =
+  match
+    Zerobus_eio.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  with
   | Error e -> Error e
   | Ok client ->
       let table = { Opt.table_name; descriptor } in
@@ -122,6 +127,45 @@ let grpc_ingest ~env ~sw (c : cfg) ~table_name ~record_type ~descriptor ~mk_row 
           | Ok _ -> Zerobus_eio.flush stream)
       |> Result.join
 
+(* --- gRPC streaming ingest, CUSTOM HEADERS auth (with_stream + headers) ---
+   Mints a bearer via the public Zerobus_eio.mint_token, then supplies it as the
+   [authorization] header to with_stream — exercising the second, caller-driven
+   authentication mechanism end to end. *)
+let grpc_ingest_headers ~env ~sw (c : cfg) ~table_name ~record_type ~descriptor
+    ~mk_row : (unit, Zerobus_core.Error.t) result =
+  match
+    Zerobus_eio.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url ()
+  with
+  | Error e -> Error e
+  | Ok client -> (
+      match
+        Zerobus_eio.mint_token ~env ~sw ~client ~table:table_name
+          ~client_id:c.client_id ~client_secret:c.client_secret
+      with
+      | Error e -> Error e
+      | Ok token ->
+          let table = { Opt.table_name; descriptor } in
+          let options = { Opt.default_stream_options with record_type } in
+          let headers =
+            [
+              ("authorization", "Bearer " ^ token);
+              ("x-databricks-zerobus-table-name", table_name);
+            ]
+          in
+          Zerobus_eio.with_stream ~env ~sw client table ~headers ~options
+            (fun stream ->
+              let rec loop i last =
+                if i >= n_rows then last
+                else
+                  match Zerobus_eio.ingest stream (mk_row i) with
+                  | Error _ as e -> e
+                  | Ok o -> loop (i + 1) (Ok o)
+              in
+              match loop 0 (Ok (Opt.offset_of_int64 0L)) with
+              | Error e -> Error e
+              | Ok _ -> Zerobus_eio.flush stream)
+          |> Result.join)
+
 (* --- REST insert --- *)
 let rest_insert ~env ~sw (c : cfg) : (unit, Zerobus_core.Error.t) result =
   match
@@ -132,7 +176,8 @@ let rest_insert ~env ~sw (c : cfg) : (unit, Zerobus_core.Error.t) result =
   | Ok client ->
       let records =
         List.init n_rows (fun i ->
-            `Assoc [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
+            `Assoc
+              [ ("id", `Int i); ("name", `String (Printf.sprintf "row-%d" i)) ])
       in
       Zerobus_rest_eio.insert ~env ~sw client ~table:c.table_rest records
 
@@ -140,7 +185,8 @@ let rest_insert ~env ~sw (c : cfg) : (unit, Zerobus_core.Error.t) result =
 let otlp_export ~env ~sw (c : cfg) : (unit, Zerobus_core.Error.t) result =
   match
     Zerobus_otlp_eio.create ~endpoint:c.endpoint ~workspace_url:c.workspace_url
-      ~table:c.table_otlp ~client_id:c.client_id ~client_secret:c.client_secret ()
+      ~table:c.table_otlp ~client_id:c.client_id ~client_secret:c.client_secret
+      ()
   with
   | Error e -> Error e
   | Ok client ->
@@ -166,22 +212,24 @@ let otlp_export ~env ~sw (c : cfg) : (unit, Zerobus_core.Error.t) result =
 
 (* Run a live action, returning true on Ok. When unconfigured, returns true
    without touching the network (clean skip). Each case gets its own Eio env/sw. *)
-let run_live label (f : env:_ -> sw:Eio.Switch.t -> cfg -> (unit, Zerobus_core.Error.t) result) : bool =
+let run_live label
+    (f : env:_ -> sw:Eio.Switch.t -> cfg -> (unit, Zerobus_core.Error.t) result)
+    : bool =
   match cfg with
   | None ->
       Printf.eprintf "[%s] %s\n%!" label skip_note;
       true
-  | Some c ->
+  | Some c -> (
       Eio_main.run @@ fun env ->
-      Eio.Switch.run @@ fun sw -> (
-        match f ~env ~sw c with
-        | Ok () ->
-            Printf.eprintf "[%s] PASS (live)\n%!" label;
-            true
-        | Error e ->
-            Printf.eprintf "[%s] FAIL (live): %s\n%!" label
-              (Zerobus_core.Error.to_string e);
-            false)
+      Eio.Switch.run @@ fun sw ->
+      match f ~env ~sw c with
+      | Ok () ->
+          Printf.eprintf "[%s] PASS (live)\n%!" label;
+          true
+      | Error e ->
+          Printf.eprintf "[%s] FAIL (live): %s\n%!" label
+            (Zerobus_core.Error.to_string e);
+          false)
 
 let () =
   Printf.eprintf
@@ -192,29 +240,54 @@ let () =
       ( "live",
         [
           Alcotest.test_case "gRPC JSON ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-json" (fun ~env ~sw c ->
                      grpc_ingest ~env ~sw c ~table_name:c.table_json
                        ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
           Alcotest.test_case "gRPC Proto ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-proto" (fun ~env ~sw c ->
                      grpc_ingest ~env ~sw c ~table_name:c.table_proto
                        ~record_type:Opt.Proto
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
                        ~mk_row:proto_row)));
           Alcotest.test_case "gRPC Arrow ingest + flush" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "grpc-arrow" (fun ~env ~sw c ->
                      grpc_ingest ~env ~sw c ~table_name:c.table_arrow
                        ~record_type:Opt.Arrow
-                       ~descriptor:(Some (Opt.descriptor_of_bytes (arrow_schema ())))
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (arrow_schema ())))
                        ~mk_row:arrow_row)));
+          (* Second auth mechanism: caller-supplied bearer via with_stream. *)
+          Alcotest.test_case "gRPC JSON ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-json-headers" (fun ~env ~sw c ->
+                     grpc_ingest_headers ~env ~sw c ~table_name:c.table_json
+                       ~record_type:Opt.Json ~descriptor:None ~mk_row:json_row)));
+          Alcotest.test_case "gRPC Proto ingest + flush (headers auth)" `Slow
+            (fun () ->
+              Alcotest.(check bool)
+                "ok" true
+                (run_live "grpc-proto-headers" (fun ~env ~sw c ->
+                     grpc_ingest_headers ~env ~sw c ~table_name:c.table_proto
+                       ~record_type:Opt.Proto
+                       ~descriptor:
+                         (Some (Opt.descriptor_of_bytes (descriptor_bytes ())))
+                       ~mk_row:proto_row)));
           Alcotest.test_case "REST insert" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "rest" (fun ~env ~sw c -> rest_insert ~env ~sw c)));
           Alcotest.test_case "OTLP logs export" `Slow (fun () ->
-              Alcotest.(check bool) "ok" true
+              Alcotest.(check bool)
+                "ok" true
                 (run_live "otlp" (fun ~env ~sw c -> otlp_export ~env ~sw c)));
         ] );
     ]

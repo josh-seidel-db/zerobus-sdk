@@ -1,17 +1,19 @@
 (** Cross-implementation OTLP acceptance (Async): our {!Zerobus_otlp_async}
-    exporter (vendored [Zerobus_otlp_proto]) against a mock collector that decodes
-    with the canonical upstream [opentelemetry.proto] types (otel_collector_async).
-    The Async counterpart of test_otlp_otel/test_otlp_otel_lwt.ml — proves genuine
-    OTLP wire-compatibility for the Async exporter (independent encoder/decoder).
+    exporter (vendored [Zerobus_otlp_proto]) against a mock collector that
+    decodes with the canonical upstream [opentelemetry.proto] types
+    (otel_collector_async). The Async counterpart of
+    test_otlp_otel/test_otlp_otel_lwt.ml — proves genuine OTLP
+    wire-compatibility for the Async exporter (independent encoder/decoder).
 
-    The mock collector is the SAME separate-process canonical-decoding binary the
-    Lwt test uses ([otel_collector_lwt.exe]) — the collector's runtime is
-    irrelevant to what's under test (the Async client + our OTLP framing), and the
-    combined async-live switch carries grpc-async 0.1.0 (no [Grpc_async.Server]),
-    whereas grpc-lwt 0.1.0 does provide a server. So we reuse the Lwt collector.
+    The mock collector is the SAME separate-process canonical-decoding binary
+    the Lwt test uses ([otel_collector_lwt.exe]) — the collector's runtime is
+    irrelevant to what's under test (the Async client + our OTLP framing), and
+    the combined async-live switch carries grpc-async 0.1.0 (no
+    [Grpc_async.Server]), whereas grpc-lwt 0.1.0 does provide a server. So we
+    reuse the Lwt collector.
 
-    Cleartext h2c, loopback, ephemeral ports. Runs on a switch with cohttp-async +
-    tls-async + opentelemetry. *)
+    Cleartext h2c, loopback, ephemeral ports. Runs on a switch with cohttp-async
+    \+ tls-async + opentelemetry. *)
 
 open! Core
 open! Async
@@ -45,9 +47,11 @@ let start_token_server () : int Deferred.t =
 let collector_exe () =
   let dir = Filename.dirname (Sys.get_argv ()).(0) in
   let candidates =
-    [ Filename.concat dir "otel_collector_lwt.exe";
+    [
+      Filename.concat dir "otel_collector_lwt.exe";
       Filename.concat dir "../test_otlp_otel/otel_collector_lwt.exe";
-      "./otel_collector_lwt.exe" ]
+      "./otel_collector_lwt.exe";
+    ]
   in
   match List.find candidates ~f:(fun p -> Sys_unix.file_exists_exn p) with
   | Some p -> p
@@ -144,7 +148,8 @@ let run () : outcome Deferred.t =
               mints = !token_mints;
               collector_saw_2_logs =
                 String.is_substring clog ~substring:"canonical-decoded 2 record";
-              collector_saw_info = String.is_substring clog ~substring:"sev0=INFO";
+              collector_saw_info =
+                String.is_substring clog ~substring:"sev0=INFO";
             })
 
 let result : outcome = Thread_safe.block_on_async_exn run
@@ -153,9 +158,11 @@ let () =
   Core.eprintf
     "ZEROBUS OCAML — OTLP CROSS-IMPL TEST (Async, canonical opentelemetry.proto)\n\
      logs ok=%b rejected=%Ld ; metrics ok=%b ; partial rejected=%Ld\n\
-     token_mints=%d ; canonical-decoded 2 logs=%b ; saw INFO=%b\n%!"
-    result.logs_ok result.logs_rejected result.metrics_ok result.partial_rejected
-    result.mints result.collector_saw_2_logs result.collector_saw_info;
+     token_mints=%d ; canonical-decoded 2 logs=%b ; saw INFO=%b\n\
+     %!"
+    result.logs_ok result.logs_rejected result.metrics_ok
+    result.partial_rejected result.mints result.collector_saw_2_logs
+    result.collector_saw_info;
   Alcotest.run "otlp-otel-async"
     [
       ( "cross-impl-export-async",
@@ -167,8 +174,7 @@ let () =
           Alcotest.test_case "metrics Export accepted" `Slow (fun () ->
               Alcotest.(check bool) "ok" true result.metrics_ok);
           Alcotest.test_case "partial success surfaced (1 rejected)" `Slow
-            (fun () ->
-              Alcotest.(check int64) "rej" 1L result.partial_rejected);
+            (fun () -> Alcotest.(check int64) "rej" 1L result.partial_rejected);
           Alcotest.test_case "token cached (mints once)" `Slow (fun () ->
               Alcotest.(check int) "mints" 1 result.mints);
           Alcotest.test_case "CANONICAL decoder read 2 log records" `Slow

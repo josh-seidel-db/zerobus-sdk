@@ -1,16 +1,17 @@
-(** Mock Zerobus [EphemeralStream] server that DROPS the first stream mid-way, to
-    exercise the driver's recovery (§12.3). Separate process, cleartext h2c.
+(** Mock Zerobus [EphemeralStream] server that DROPS the first stream mid-way,
+    to exercise the driver's recovery (§12.3). Separate process, cleartext h2c.
 
     Behavior (mirrors the proven recovery spike, now against the real driver):
-    - On the FIRST bidi stream: reply to CreateIngestStream, ack records by their
-      offset_id, but after [drop_after_n] acked records end the stream with a
-      RETRYABLE gRPC status (UNAVAILABLE=14) instead of OK — a recoverable break.
+    - On the FIRST bidi stream: reply to CreateIngestStream, ack records by
+      their offset_id, but after [drop_after_n] acked records end the stream
+      with a RETRYABLE gRPC status (UNAVAILABLE=14) instead of OK — a
+      recoverable break.
     - A process-global flag ensures only the first stream drops; the reconnected
       stream is served to completion (acks every replayed + new record).
 
-    Acks carry [durability_ack_up_to_offset] = the record's own offset_id, so the
-    driver's monotonic watermark advances correctly across the reconnect and the
-    un-acked replay set shrinks. *)
+    Acks carry [durability_ack_up_to_offset] = the record's own offset_id, so
+    the driver's monotonic watermark advances correctly across the reconnect and
+    the un-acked replay set shrinks. *)
 
 module Z = Zerobus_proto.Zerobus_service
 
@@ -92,7 +93,8 @@ let () =
      in
      let handler =
        H2_lwt_unix.Server.create_connection_handler ?config:None
-         ~request_handler:(fun _ reqd -> Grpc_lwt.Server.handle_request server reqd)
+         ~request_handler:(fun _ reqd ->
+           Grpc_lwt.Server.handle_request server reqd)
          ~error_handler:(fun _ ?request:_ _ _ -> ())
      in
      Printf.printf "READY %d\n%!" actual_port;

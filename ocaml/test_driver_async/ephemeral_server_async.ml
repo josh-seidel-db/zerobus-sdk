@@ -1,12 +1,13 @@
-(** Mock Zerobus [EphemeralStream] server for the Async driver test — a standalone
-    process (the proven separate-process topology), cleartext h2c on loopback.
+(** Mock Zerobus [EphemeralStream] server for the Async driver test — a
+    standalone process (the proven separate-process topology), cleartext h2c on
+    loopback.
 
     Identical wire behaviour to [ephemeral_server.ml] (the Lwt mock) and
     [ephemeral_server_eio.ml], just on the Async grpc/h2 stack: speaks the REAL
     vendored proto — on [CreateIngestStreamRequest] it replies with a
-    [CreateIngestStreamResponse] (a stream_id); for each [IngestRecordRequest] it
-    advances a durability watermark and replies with an [IngestRecordResponse]
-    carrying [durability_ack_up_to_offset].
+    [CreateIngestStreamResponse] (a stream_id); for each [IngestRecordRequest]
+    it advances a durability watermark and replies with an
+    [IngestRecordResponse] carrying [durability_ack_up_to_offset].
 
     This is the backend the runtime-agnostic driver ({!Zerobus_core.Make}) runs
     against on Async, exercising create/ingest/flush end to end without a live
@@ -38,7 +39,8 @@ let handle_stream (requests : string Pipe.Reader.t)
             in
             Pipe.write responses (encode_resp resp)
         | Z.Ingest_record r ->
-            if Int64.( > ) r.Z.offset_id !watermark then watermark := r.Z.offset_id;
+            if Int64.( > ) r.Z.offset_id !watermark then
+              watermark := r.Z.offset_id;
             let resp =
               Z.Ingest_record_response
                 (Z.make_ingest_record_response
@@ -63,11 +65,14 @@ let grpc_server () =
 
 let main () =
   let requested_port =
-    if Array.length (Sys.get_argv ()) > 1 then Int.of_string (Sys.get_argv ()).(1)
+    if Array.length (Sys.get_argv ()) > 1 then
+      Int.of_string (Sys.get_argv ()).(1)
     else 0
   in
   let server = grpc_server () in
-  let request_handler _addr reqd = Grpc_async.Server.handle_request server reqd in
+  let request_handler _addr reqd =
+    Grpc_async.Server.handle_request server reqd
+  in
   let error_handler _addr ?request:_ _err start_response =
     let body = start_response H2.Headers.empty in
     H2.Body.Writer.close body

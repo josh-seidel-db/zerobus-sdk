@@ -1,0 +1,13 @@
+# Throwaway proof-of-concept spikes — not shipped, excluded from the format gate.
+spike/**
+spike-arrow-flight-integration/**
+spike-arrow-ipc/**
+spike-arrow-ipc-real/**
+spike-async/**
+spike-async-tls/**
+spike-eio/**
+spike-flight/**
+spike-live/**
+spike-recovery/**
+# One-off live harnesses (run by hand against a real workspace, not in CI).
+live/**

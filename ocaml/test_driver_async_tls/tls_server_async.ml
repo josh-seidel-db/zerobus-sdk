@@ -1,21 +1,22 @@
 (** Self-signed TLS h2 mock Zerobus [EphemeralStream] server for the Async
     live-TLS test — a standalone process. Identical proto behaviour to
     [ephemeral_server_async.ml] (the cleartext Async mock), but each accepted
-    socket is wrapped in a server-side TLS 1.3 handshake (ALPN h2) using a freshly
-    generated self-signed certificate. On startup it prints
+    socket is wrapped in a server-side TLS 1.3 handshake (ALPN h2) using a
+    freshly generated self-signed certificate. On startup it prints
     [READY <port> <cert-sha256-b64>] so the client can pin that exact cert (it
     can't use the system trust store for a self-signed cert). This is what
     actually exercises the Async transport's real TLS + ALPN path (the cleartext
     mocks never do).
 
-    {b Why hand-rolled.} On the tls-async-equipped switch, [h2] is pinned to 0.12
-    (so the SDK lib compiles), which forces async v0.15 and drags [grpc-async] down
-    to 0.1.0 — a version with NO [Grpc_async.Server] module. So this mock cannot use
-    the grpc-async server helpers the cleartext mock uses; instead it drives the
-    runtime-agnostic {!H2.Server_connection} core over the [tls-async]
-    [Reader]/[Writer] duplex itself (the server-side mirror of the client's
-    [h2_pump.ml]) and does gRPC length-prefix framing by hand — exactly the wire
-    format {!Zerobus_io_async} produces. Runs only where tls-async is present. *)
+    {b Why hand-rolled.} On the tls-async-equipped switch, [h2] is pinned to
+    0.12 (so the SDK lib compiles), which forces async v0.15 and drags
+    [grpc-async] down to 0.1.0 — a version with NO [Grpc_async.Server] module.
+    So this mock cannot use the grpc-async server helpers the cleartext mock
+    uses; instead it drives the runtime-agnostic {!H2.Server_connection} core
+    over the [tls-async] [Reader]/[Writer] duplex itself (the server-side mirror
+    of the client's [h2_pump.ml]) and does gRPC length-prefix framing by hand —
+    exactly the wire format {!Zerobus_io_async} produces. Runs only where
+    tls-async is present. *)
 
 open! Core
 open! Async
@@ -47,8 +48,10 @@ let grpc_deframe (acc : string) : string list * string =
     if String.length acc < 5 then (List.rev msgs, acc)
     else
       let len =
-        (Char.to_int acc.[1] lsl 24) lor (Char.to_int acc.[2] lsl 16)
-        lor (Char.to_int acc.[3] lsl 8) lor Char.to_int acc.[4]
+        (Char.to_int acc.[1] lsl 24)
+        lor (Char.to_int acc.[2] lsl 16)
+        lor (Char.to_int acc.[3] lsl 8)
+        lor Char.to_int acc.[4]
       in
       if String.length acc < 5 + len then (List.rev msgs, acc)
       else
@@ -72,8 +75,7 @@ let handle_reqd (reqd : H2.Reqd.t) : unit =
   let watermark = ref (-1L) in
   let acc = ref "" in
   let on_eof () =
-    H2.Reqd.schedule_trailers reqd
-      (H2.Headers.of_list [ ("grpc-status", "0") ]);
+    H2.Reqd.schedule_trailers reqd (H2.Headers.of_list [ ("grpc-status", "0") ]);
     H2.Body.Writer.close out
   in
   let rec on_read bs ~off ~len =
@@ -113,8 +115,8 @@ let serve_connection (reader : Reader.t) (writer : Writer.t) : unit Deferred.t =
     H2.Body.Writer.close body
   in
   let conn =
-    H2.Server_connection.create ?config:None ~error_handler
-      (fun reqd -> handle_reqd reqd)
+    H2.Server_connection.create ?config:None ~error_handler (fun reqd ->
+        handle_reqd reqd)
   in
   let rec run_writer () =
     match H2.Server_connection.next_write_operation conn with
@@ -147,8 +149,10 @@ let serve_connection (reader : Reader.t) (writer : Writer.t) : unit Deferred.t =
 let make_self_signed () : Tls.Config.own_cert * string =
   let key = X509.Private_key.generate `RSA in
   let dn =
-    [ X509.Distinguished_name.(
-        Relative_distinguished_name.singleton (CN "localhost")) ]
+    [
+      X509.Distinguished_name.(
+        Relative_distinguished_name.singleton (CN "localhost"));
+    ]
   in
   let csr =
     match X509.Signing_request.create dn key with
@@ -172,14 +176,13 @@ let make_self_signed () : Tls.Config.own_cert * string =
 
 let main () =
   let requested_port =
-    if Array.length (Sys.get_argv ()) > 1 then Int.of_string (Sys.get_argv ()).(1)
+    if Array.length (Sys.get_argv ()) > 1 then
+      Int.of_string (Sys.get_argv ()).(1)
     else 0
   in
   Mirage_crypto_rng_unix.initialize (module Mirage_crypto_rng.Fortuna);
   let certificates, fp_b64 = make_self_signed () in
-  let tls_cfg =
-    Tls.Config.server ~certificates ~alpn_protocols:[ "h2" ] ()
-  in
+  let tls_cfg = Tls.Config.server ~certificates ~alpn_protocols:[ "h2" ] () in
   let where =
     Tcp.Where_to_listen.bind_to Tcp.Bind_to_address.Localhost
       (if requested_port = 0 then Tcp.Bind_to_port.On_port_chosen_by_os

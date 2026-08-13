@@ -1,10 +1,10 @@
-(** Phase 7d acceptance: {!Zerobus_otlp} (the OTLP logs/metrics exporter) against
-    a mock OTLP collector (separate process, cleartext h2c) + an in-process cohttp
-    OIDC token endpoint.
+(** Phase 7d acceptance: {!Zerobus_otlp} (the OTLP logs/metrics exporter)
+    against a mock OTLP collector (separate process, cleartext h2c) + an
+    in-process cohttp OIDC token endpoint.
 
     Proves the full otlp/grpc flow end-to-end without a live workspace:
-    - the exporter mints a table-scoped token (client-credentials grant) and opens
-      a TLS-off h2c connection to the collector;
+    - the exporter mints a table-scoped token (client-credentials grant) and
+      opens a TLS-off h2c connection to the collector;
     - a batch of OTel logs is framed as a valid ExportLogsServiceRequest, the
       collector DECODES it (proving the wire types + framing), and returns OK;
     - likewise for metrics via MetricsService/Export;
@@ -136,7 +136,7 @@ let run () : outcome Lwt.t =
               metrics_ok = ok r_metrics;
               metrics_rejected = rej r_metrics;
               partial_rejected = rej r_partial;
-              empty_ok = (r_empty = Ok { rejected = 0L; error_message = "" });
+              empty_ok = r_empty = Ok { rejected = 0L; error_message = "" };
               mints = !token_mints;
             })
 
@@ -151,7 +151,8 @@ let result =
            metrics_export: ok=%b rejected=%Ld\n\
            partial_success (REJECT1): rejected=%Ld (expect 1)\n\
            empty_is_noop : %b\n\
-           token_mints   : %d (expect 1 — cached across exports)\n%!"
+           token_mints   : %d (expect 1 — cached across exports)\n\
+           %!"
           Sys.ocaml_version o.logs_ok o.logs_rejected o.metrics_ok
           o.metrics_rejected o.partial_rejected o.empty_ok o.mints;
         Lwt.return o))

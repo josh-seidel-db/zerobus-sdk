@@ -1,14 +1,15 @@
-(** The OTLP exporter for the Zerobus Ingest SDK — Async runtime (DESIGN.md §4.3).
+(** The OTLP exporter for the Zerobus Ingest SDK — Async runtime (DESIGN.md
+    §4.3).
 
     The Async counterpart of {!Zerobus_otlp} (the Lwt reference). Same two unary
-    Export RPCs over the same TLS 1.3 + ALPN-h2 transport — but reusing the {b
-    Async} H2 client ([Zerobus_async.Io_async_for_test.H2_client]) and a
+    Export RPCs over the same TLS 1.3 + ALPN-h2 transport — but reusing the
+    {b Async} H2 client ([Zerobus_async.Io_async_for_test.H2_client]) and a
     [cohttp-async] token mint. The OTLP wire types come from the shared
-    [Zerobus_otlp_proto] library (vendored OpenTelemetry protos), identical to the
-    Lwt exporter.
+    [Zerobus_otlp_proto] library (vendored OpenTelemetry protos), identical to
+    the Lwt exporter.
 
-    This library is [optional]: it only builds on a switch where [cohttp-async] is
-    installed (which downgrades cohttp 6.0->5.3 — benign, see
+    This library is [optional]: it only builds on a switch where [cohttp-async]
+    is installed (which downgrades cohttp 6.0->5.3 — benign, see
     doc/arch/tls_async_status.md). See {!Zerobus_otlp_async} (the .mli) for the
     contract. *)
 
@@ -32,7 +33,7 @@ type t = {
   endpoint_port : int;
   table : string;
   tls : bool;
-  application_name : string option [@ocaml.warning "-69"];
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   mutable token_cache : (string * float) option;
@@ -83,33 +84,35 @@ let mint_token t : (string, error) result Deferred.t =
           | Ok body -> (
               let token_url = t.workspace_url ^ "/oidc/v1/token" in
               match%map
-                Zerobus_async.Oauth.post_token ~token_url
-                  ~client_id:t.client_id ~client_secret:t.client_secret ~body
+                Zerobus_async.Oauth.post_token ~token_url ~client_id:t.client_id
+                  ~client_secret:t.client_secret ~body
               with
               | Error exn ->
                   Error
                     (Error.Transport_error
                        (Printf.sprintf "token request failed: %s"
                           (Exn.to_string exn)))
-              | Ok (code, body_str) ->
+              | Ok (code, body_str) -> (
                   if code < 200 || code >= 300 then
                     Error
                       (Error.Auth_error
                          (Printf.sprintf "token endpoint HTTP %d" code))
-                  else (
-                    match Zerobus_async.Oauth.parse_token_response ~now body_str with
+                  else
+                    match
+                      Zerobus_async.Oauth.parse_token_response ~now body_str
+                    with
                     | Some (tok, expiry) ->
                         t.token_cache <- Some (tok, expiry);
                         Ok tok
-                    | None -> Error (Error.Auth_error "malformed token response"))
-              )))
+                    | None ->
+                        Error (Error.Auth_error "malformed token response")))))
 
 (* The generic unary-Export path — same shape as the Lwt reference, Async idioms:
    connect, open the RPC, send the one framed request, half-close, read one
    response, check the gRPC status, tear down. *)
 let unary_export t ~service ~rpc ~(encode : unit -> string)
-    ~(decode : string -> export_result) : (export_result, error) result Deferred.t
-    =
+    ~(decode : string -> export_result) :
+    (export_result, error) result Deferred.t =
   match%bind mint_token t with
   | Error e -> return (Error e)
   | Ok token -> (
@@ -125,13 +128,13 @@ let unary_export t ~service ~rpc ~(encode : unit -> string)
           ~headers ()
       with
       | Error e -> return (Error e)
-      | Ok conn ->
+      | Ok conn -> (
           let finish result =
             let%map () = H2.shutdown conn in
             result
           in
           let%bind call_r = H2.start_bidi conn ~service ~rpc () in
-          (match call_r with
+          match call_r with
           | Error e -> finish (Error e)
           | Ok call -> (
               let%bind send_r = H2.send call (encode ()) in
@@ -166,8 +169,8 @@ let unary_export t ~service ~rpc ~(encode : unit -> string)
                               | Some resp -> finish (Ok (decode resp))
                               | None ->
                                   finish
-                                    (Ok { rejected = 0L; error_message = "" }))
-                          ))))))
+                                    (Ok { rejected = 0L; error_message = "" })))
+                      )))))
 
 let export_logs t (rls : OLogs.resource_logs list) :
     (export_result, error) result Deferred.t =
@@ -193,8 +196,8 @@ let export_logs t (rls : OLogs.resource_logs list) :
         | None -> { rejected = 0L; error_message = "" }
       in
       unary_export t
-        ~service:"opentelemetry.proto.collector.logs.v1.LogsService" ~rpc:"Export"
-        ~encode ~decode
+        ~service:"opentelemetry.proto.collector.logs.v1.LogsService"
+        ~rpc:"Export" ~encode ~decode
 
 let export_metrics t (rms : OMetrics.resource_metrics list) :
     (export_result, error) result Deferred.t =

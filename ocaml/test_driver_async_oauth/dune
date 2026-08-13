@@ -5,8 +5,9 @@
 ; (optional) so the dir VANISHES on switches WITHOUT cohttp-async (e.g. the canonical
 ; fl414, which keeps cohttp 6.0) instead of erroring — built-in OAuth is a dune
 ; [select] on cohttp-async (see lib/async/dune, doc/arch/tls_async_status.md). It
-; lights up on a cohttp-async-equipped switch. NOT in CI's fl414 job (which targets
-; specific dirs and never names this one), same pattern as test_driver_async_tls/.
+; lights up on a cohttp-async-equipped switch. Not in the standard fl414 CI job;
+; runs in the NON-BLOCKING bespoke-switch job (.github/workflows/
+; ci-ocaml-async-bespoke.yml), same pattern as test_driver_async_tls/.
 (executable
  (name test_oauth_async)
  (modules test_oauth_async)

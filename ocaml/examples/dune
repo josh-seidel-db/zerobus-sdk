@@ -27,10 +27,64 @@
  (modules otlp_export_lwt)
  (libraries zerobus-otlp zerobus-otlp.proto zerobus-core lwt lwt.unix))
 
-; The Eio example needs OCaml >= 5 (like the zerobus-eio package itself).
+; The Eio examples need OCaml >= 5 (like the zerobus-eio package itself).
 (executable
  (name json_loop_then_flush_eio)
  (modules json_loop_then_flush_eio)
  (enabled_if
   (>= %{ocaml_version} 5.0))
  (libraries zerobus-eio zerobus-core eio eio_main))
+
+(executable
+ (name ack_callback_eio)
+ (modules ack_callback_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-eio zerobus-core eio eio_main))
+
+(executable
+ (name rest_insert_eio)
+ (modules rest_insert_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-rest-eio zerobus-core eio eio_main yojson))
+
+(executable
+ (name otlp_export_eio)
+ (modules otlp_export_eio)
+ (enabled_if
+  (>= %{ocaml_version} 5.0))
+ (libraries zerobus-otlp-eio zerobus-otlp.proto zerobus-core eio eio_main))
+
+; The Async examples (Core/Async idiom). They build on the 4.14 switch alongside
+; the zerobus-async / -rest-async / -otlp-async packages. Note: to actually RUN
+; the gRPC/REST/OTLP paths against a live workspace, the real tls-async OAuth
+; backend must be present (a dune select); on the canonical switch they compile
+; against the honest-error backend, which is what CI compile-checks.
+(executable
+ (name json_loop_then_flush_async)
+ (modules json_loop_then_flush_async)
+ (libraries zerobus-async zerobus-core core async)
+ (preprocess
+  (pps ppx_let)))
+
+(executable
+ (name ack_callback_async)
+ (modules ack_callback_async)
+ (libraries zerobus-async zerobus-core core async)
+ (preprocess
+  (pps ppx_let)))
+
+(executable
+ (name rest_insert_async)
+ (modules rest_insert_async)
+ (libraries zerobus-rest-async zerobus-core core async)
+ (preprocess
+  (pps ppx_let)))
+
+(executable
+ (name otlp_export_async)
+ (modules otlp_export_async)
+ (libraries zerobus-otlp-async zerobus-otlp.proto zerobus-core core async)
+ (preprocess
+  (pps ppx_let)))

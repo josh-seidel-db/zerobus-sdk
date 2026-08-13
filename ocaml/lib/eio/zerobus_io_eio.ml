@@ -1,33 +1,36 @@
 (** Eio instantiation of {!Zerobus_core.Io.IO} — the direct-style runtime.
 
-    This is where the two design-review correctness findings (§6.2) bite, and this
-    file is the proof they were handled:
+    This is where the two design-review correctness findings (§6.2) bite, and
+    this file is the proof they were handled:
 
     - {b Direct-style effect.} Eio is not monadic: ['a t = 'a], [return x = x],
-      [bind x f = f x]. A value of type ['a t] is therefore an {e already-computed}
-      ['a].
+      [bind x f = f x]. A value of type ['a t] is therefore an
+      {e already-computed} ['a].
 
     - {b Thunked combinators (finding #1).} Because ['a t] is eager, [both] must
       take [unit -> _] thunks and fork them as Eio fibers ([Fiber.both]) — if it
-      took values, both sides would already have run, sequentially, defeating the
-      send/ack concurrency. Results are captured through refs since [Fiber.both]
-      returns [unit].
+      took values, both sides would already have run, sequentially, defeating
+      the send/ack concurrency. Results are captured through refs since
+      [Fiber.both] returns [unit].
 
-    - {b Scoped daemons (finding #2).} Eio forbids unscoped background fibers, so
-      {!Scope} wraps an Eio [Switch.t] and [fork_daemon] uses [Fiber.fork_daemon
-      ~sw]. [with_scope] runs a [Switch.run]; leaving it cancels every daemon.
+    - {b Scoped daemons (finding #2).} Eio forbids unscoped background fibers,
+      so {!Scope} wraps an Eio [Switch.t] and [fork_daemon] uses
+      [Fiber.fork_daemon ~sw]. [with_scope] runs a [Switch.run]; leaving it
+      cancels every daemon.
 
-    {b Transport (Phase 3/5).} The runtime-generic [connect] signature deliberately
-    does not carry Eio's [Eio.Env] (network capability) or a [Switch.t] — but the
-    Eio socket connect needs both. The direct-style {!Zerobus_eio} public façade
-    supplies them: it runs inside [Eio_main.run] + [Switch.run] and installs the
-    live [net]/[sw] into {!Ctx} before driving the core [Make] functor. [connect]
-    then reads them from {!Ctx}. This mirrors the [env]/[~sw] threading of §6.2.
+    {b Transport (Phase 3/5).} The runtime-generic [connect] signature
+    deliberately does not carry Eio's [Eio.Env] (network capability) or a
+    [Switch.t] — but the Eio socket connect needs both. The direct-style
+    {!Zerobus_eio} public façade supplies them: it runs inside [Eio_main.run] +
+    [Switch.run] and installs the live [net]/[sw] into {!Ctx} before driving the
+    core [Make] functor. [connect] then reads them from {!Ctx}. This mirrors the
+    [env]/[~sw] threading of §6.2.
 
-    Like the Lwt reference ({!Zerobus_io_lwt}), the transport drives {b raw h2} and
-    {b flushes each frame}: grpc-eio 0.2.0's client sender omits the h2 flush
-    (§6.5), which stalls a real server / deadlocks an in-process mock. It also sets
-    the [:authority] pseudo-header (required by gRPC servers — gate B finding). *)
+    Like the Lwt reference ({!Zerobus_io_lwt}), the transport drives {b raw h2}
+    and {b flushes each frame}: grpc-eio 0.2.0's client sender omits the h2
+    flush (§6.5), which stalls a real server / deadlocks an in-process mock. It
+    also sets the [:authority] pseudo-header (required by gRPC servers — gate B
+    finding). *)
 
 module Error = Zerobus_core.Error
 
@@ -43,8 +46,7 @@ module Scope = struct
      switch finishes. We stash the current switch so fork_daemon can reach it. *)
   type t = { sw : Eio.Switch.t }
 
-  let with_scope (f : t -> 'a io) : 'a io =
-    Eio.Switch.run (fun sw -> f { sw })
+  let with_scope (f : t -> 'a io) : 'a io = Eio.Switch.run (fun sw -> f { sw })
 end
 
 let both (a : unit -> 'a t) (b : unit -> 'b t) : 'a * 'b =
@@ -57,8 +59,7 @@ let both (a : unit -> 'a t) (b : unit -> 'b t) : 'a * 'b =
 (* First-wins race: Eio.Fiber.first runs both and returns the first to finish,
    CANCELLING the loser — the abandon-the-loser semantics {!Io.IO.first} wants.
    Direct style: the thunks return values directly. *)
-let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t =
-  Eio.Fiber.first a b
+let first (a : unit -> 'a t) (b : unit -> 'a t) : 'a t = Eio.Fiber.first a b
 
 let fork_daemon (scope : Scope.t) (f : unit -> unit t) : unit =
   Eio.Fiber.fork_daemon ~sw:scope.Scope.sw (fun () ->
@@ -78,10 +79,7 @@ module Mailbox = struct
      [close] pushes a [None] sentinel: a blocked [take] is woken by it and returns
      [None]. [closed] additionally short-circuits [put] and repeated [take]s.
      (Capacity is +1 so [close] can always enqueue the sentinel without blocking.) *)
-  type 'a t = {
-    stream : 'a option Eio.Stream.t;
-    mutable closed : bool;
-  }
+  type 'a t = { stream : 'a option Eio.Stream.t; mutable closed : bool }
 
   let create ~capacity =
     { stream = Eio.Stream.create (capacity + 1); closed = false }
@@ -160,12 +158,15 @@ let grpc_deframe (acc : string) : string list * string =
     if String.length acc < 5 then (List.rev msgs, acc)
     else
       let len =
-        (Char.code acc.[1] lsl 24) lor (Char.code acc.[2] lsl 16)
-        lor (Char.code acc.[3] lsl 8) lor Char.code acc.[4]
+        (Char.code acc.[1] lsl 24)
+        lor (Char.code acc.[2] lsl 16)
+        lor (Char.code acc.[3] lsl 8)
+        lor Char.code acc.[4]
       in
       if String.length acc < 5 + len then (List.rev msgs, acc)
       else
-        loop (String.sub acc (5 + len) (String.length acc - 5 - len))
+        loop
+          (String.sub acc (5 + len) (String.length acc - 5 - len))
           (String.sub acc 5 len :: msgs)
   in
   loop acc []
@@ -217,9 +218,13 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     let { Ctx.net; sw; authenticator = auth_override } = Ctx.get () in
     try
       (* Resolve + connect a TCP socket via the façade-supplied net capability. *)
-      let addrs = Eio.Net.getaddrinfo_stream ~service:(string_of_int port) net host in
+      let addrs =
+        Eio.Net.getaddrinfo_stream ~service:(string_of_int port) net host
+      in
       match addrs with
-      | [] -> Error (Error.Transport_error (Printf.sprintf "no address for %s" host))
+      | [] ->
+          Error
+            (Error.Transport_error (Printf.sprintf "no address for %s" host))
       | addr :: _ ->
           let socket = Eio.Net.connect ~sw net addr in
           if tls then begin
@@ -240,7 +245,10 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
             in
             let peer_name =
               match Domain_name.of_string host with
-              | Ok d -> ( match Domain_name.host d with Ok h -> Some h | Error _ -> None)
+              | Ok d -> (
+                  match Domain_name.host d with
+                  | Ok h -> Some h
+                  | Error _ -> None)
               | Error _ -> None
             in
             let cfg =
@@ -253,15 +261,16 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
             let tls_flow = Tls_eio.client_of_flow cfg ?host:peer_name socket in
             (* Fail fast unless ALPN negotiated h2 (mandatory for gRPC). *)
             (match Tls_eio.epoch tls_flow with
-             | Ok { Tls.Core.alpn_protocol = Some "h2"; _ } -> ()
-             | Ok { Tls.Core.alpn_protocol = Some other; _ } ->
-                 failwith (Printf.sprintf "ALPN != h2 (got %s)" other)
-             | Ok { Tls.Core.alpn_protocol = None; _ } ->
-                 failwith "ALPN not negotiated (no h2)"
-             | Error () -> failwith "no TLS epoch (handshake/ALPN failed)");
+            | Ok { Tls.Core.alpn_protocol = Some "h2"; _ } -> ()
+            | Ok { Tls.Core.alpn_protocol = Some other; _ } ->
+                failwith (Printf.sprintf "ALPN != h2 (got %s)" other)
+            | Ok { Tls.Core.alpn_protocol = None; _ } ->
+                failwith "ALPN not negotiated (no h2)"
+            | Error () -> failwith "no TLS epoch (handshake/ALPN failed)");
             let h2 =
               H2_eio.Client.create_connection ~sw
-                ~error_handler:(fun _ -> ()) (stream_socket_of_flow tls_flow)
+                ~error_handler:(fun _ -> ())
+                (stream_socket_of_flow tls_flow)
             in
             Ok { h2; scheme = "https"; conn_headers = headers }
           end
@@ -269,7 +278,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
             (* Cleartext h2c for loopback test mocks. *)
             let h2 =
               H2_eio.Client.create_connection ~sw
-                ~error_handler:(fun _ -> ()) socket
+                ~error_handler:(fun _ -> ())
+                socket
             in
             Ok { h2; scheme = "http"; conn_headers = headers }
     with exn -> Error (Error.Transport_error (Printexc.to_string exn))
@@ -290,17 +300,21 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
        h2 rejects a repeated pseudo-header with a stream/protocol error, which
        manifests as a silently stalled RPC. [:authority] is already folded into
        [authority] above; [host] is a synthetic key the caller uses to hint it. *)
-    let ours = [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ] in
+    let ours =
+      [ ":authority"; "te"; "content-type"; "grpc-encoding"; "host" ]
+    in
     let caller =
       List.filter
         (fun (k, _) -> not (List.mem k ours))
         (conn.conn_headers @ headers)
     in
     let base_headers =
-      [ (":authority", authority);
+      [
+        (":authority", authority);
         ("te", "trailers");
         ("content-type", "application/grpc+proto");
-        ("grpc-encoding", "identity") ]
+        ("grpc-encoding", "identity");
+      ]
       @ caller
     in
     let req =
@@ -324,7 +338,9 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     let trailers_handler (h : H2.Headers.t) =
       match (H2.Headers.get h "grpc-status", !call_ref) with
       | Some s, Some c ->
-          let msg = Option.value (H2.Headers.get h "grpc-message") ~default:"" in
+          let msg =
+            Option.value (H2.Headers.get h "grpc-message") ~default:""
+          in
           c.grpc_status <- Some ((try int_of_string s with _ -> -1), msg)
       | _ -> ()
     in
@@ -367,7 +383,8 @@ module H2_client : Zerobus_core.Grpc_transport.S with type 'a io = 'a t = struct
     | Some (code, message) -> Error (Error.Server_status { code; message })
 
   let shutdown (conn : connection) : unit io =
-    try ignore (Eio.Promise.await (H2_eio.Client.shutdown conn.h2)) with _ -> ()
+    try ignore (Eio.Promise.await (H2_eio.Client.shutdown conn.h2))
+    with _ -> ()
 end
 
 let sleep secs = Eio_unix.sleep secs
@@ -379,16 +396,21 @@ let sleep secs = Eio_unix.sleep secs
 module Io_impl = struct
   type 'a t = 'a
   type 'a io = 'a t
+
   let return = return
   let bind = bind
   let map = map
+
   module Scope = Scope
+
   let both = both
   let first = first
   let fork_daemon = fork_daemon
+
   module Mutex = Mutex
   module Mailbox = Mailbox
   module H2_client = H2_client
+
   let sleep = sleep
 end
 
@@ -399,6 +421,8 @@ module Stream = Zerobus_core.Make (Io_impl)
    façade when [record_type = Arrow]; needs no libarrow (Flight_protocol carries
    the IPC bytes opaquely, the caller supplies them via the zerobus-arrow codec). *)
 module Stream_flight =
-  Zerobus_core.Stream.Make_with_protocol (Io_impl) (Zerobus_core.Flight_protocol)
+  Zerobus_core.Stream.Make_with_protocol
+    (Io_impl)
+    (Zerobus_core.Flight_protocol)
 
 type stream_handle = Stream.stream

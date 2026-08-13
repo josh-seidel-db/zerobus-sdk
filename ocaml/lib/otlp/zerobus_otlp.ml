@@ -1,8 +1,9 @@
 (** The OTLP exporter for the Zerobus Ingest SDK (DESIGN.md §4.3).
 
     See {!Zerobus_otlp} (the .mli) for the contract. A unary [Export] over the
-    same TLS+ALPN-h2 transport the gRPC SDK uses ([Zerobus.Io_lwt_for_test.H2_client]),
-    plus the same scoped client-credentials OAuth grant
+    same TLS+ALPN-h2 transport the gRPC SDK uses
+    ([Zerobus.Io_lwt_for_test.H2_client]), plus the same scoped
+    client-credentials OAuth grant
     ([Zerobus_core.Config.oauth_token_request_body]). *)
 
 module Config = Zerobus_core.Config
@@ -25,7 +26,7 @@ type t = {
   endpoint_port : int;
   table : string;
   tls : bool;
-  application_name : string option [@ocaml.warning "-69"];
+  application_name : string option; [@ocaml.warning "-69"]
   client_id : string;
   client_secret : string;
   mutable token_cache : (string * float) option;
@@ -35,7 +36,8 @@ type t = {
 let _ = fun (x : t) -> ignore x.application_name
 
 let create ?(application_name : string option) ?(tls = true) ~endpoint
-    ~workspace_url ~table ~client_id ~client_secret () : (t, error) result Lwt.t =
+    ~workspace_url ~table ~client_id ~client_secret () : (t, error) result Lwt.t
+    =
   match Config.workspace_id_of_url workspace_url with
   | Error e -> Lwt.return (Error e)
   | Ok workspace_id -> (
@@ -71,7 +73,7 @@ let mint_token t : (string, error) result Lwt.t =
               ~table:t.table
           with
           | Error e -> Lwt.return (Error e)
-          | Ok body -> (
+          | Ok body ->
               let token_url = t.workspace_url ^ "/oidc/v1/token" in
               let basic =
                 Base64.encode_string (t.client_id ^ ":" ^ t.client_secret)
@@ -136,7 +138,7 @@ let mint_token t : (string, error) result Lwt.t =
                     (Error
                        (Error.Transport_error
                           (Printf.sprintf "token request failed: %s"
-                             (Printexc.to_string exn))))))))
+                             (Printexc.to_string exn)))))))
 
 (* The generic unary-Export path: connect, open the RPC, send the one framed
    request, half-close, read exactly one response frame, check the gRPC status,
@@ -152,8 +154,7 @@ let unary_export t ~service ~rpc ~(encode : unit -> string)
         [
           ("authorization", "Bearer " ^ token);
           ("x-databricks-zerobus-table-name", t.table);
-          ( ":authority",
-            Printf.sprintf "%s:%d" t.endpoint_host t.endpoint_port );
+          (":authority", Printf.sprintf "%s:%d" t.endpoint_host t.endpoint_port);
         ]
       in
       let* conn_r =
@@ -162,13 +163,13 @@ let unary_export t ~service ~rpc ~(encode : unit -> string)
       in
       match conn_r with
       | Error e -> Lwt.return (Error e)
-      | Ok conn ->
+      | Ok conn -> (
           let finish result =
             let* () = H2.shutdown conn in
             Lwt.return result
           in
           let* call_r = H2.start_bidi conn ~service ~rpc () in
-          (match call_r with
+          match call_r with
           | Error e -> finish (Error e)
           | Ok call -> (
               let* send_r = H2.send call (encode ()) in
@@ -206,9 +207,8 @@ let unary_export t ~service ~rpc ~(encode : unit -> string)
                                   (* OK status but no response message: treat as
                                      a clean full-accept. *)
                                   finish
-                                    (Ok { rejected = 0L; error_message = "" }))
-                          )))))
-      )
+                                    (Ok { rejected = 0L; error_message = "" })))
+                      )))))
 
 let export_logs t (rls : OLogs.resource_logs list) :
     (export_result, error) result Lwt.t =
@@ -233,7 +233,8 @@ let export_logs t (rls : OLogs.resource_logs list) :
             }
         | None -> { rejected = 0L; error_message = "" }
       in
-      unary_export t ~service:"opentelemetry.proto.collector.logs.v1.LogsService"
+      unary_export t
+        ~service:"opentelemetry.proto.collector.logs.v1.LogsService"
         ~rpc:"Export" ~encode ~decode
 
 let export_metrics t (rms : OMetrics.resource_metrics list) :

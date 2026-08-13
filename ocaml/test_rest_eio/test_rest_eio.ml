@@ -1,15 +1,17 @@
 (** Eio REST acceptance: {!Zerobus_rest_eio} (the stateless REST insert helper,
-    Eio runtime) against an in-process cohttp-eio mock that plays BOTH endpoints:
-      - [POST /oidc/v1/token]                              -> the OAuth grant
-      - [POST /zerobus/v1/tables/<table>/insert]           -> the batch insert
+    Eio runtime) against an in-process cohttp-eio mock that plays BOTH
+    endpoints:
+    - [POST /oidc/v1/token] -> the OAuth grant
+    - [POST /zerobus/v1/tables/<table>/insert] -> the batch insert
 
     The Eio counterpart of test_rest/test_rest_lwt.ml — same assertions, same
     coverage, direct-style. Proves the full REST flow end-to-end without a live
     workspace:
-    - the client-credentials grant is issued (HTTP Basic client auth, form body),
-      and the returned bearer token is attached to the insert request;
+    - the client-credentials grant is issued (HTTP Basic client auth, form
+      body), and the returned bearer token is attached to the insert request;
     - records are POSTed as a single JSON array to the right table path;
-    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the code;
+    - a 2xx insert -> [Ok ()]; a non-2xx insert -> [Server_status] with the
+      code;
     - an empty batch sends nothing ([Ok ()]);
     - the token is cached (a second insert to the same table mints only once).
 
@@ -28,7 +30,8 @@ let saw_basic = ref false
 let fail_insert = ref false
 
 let starts_with s pre =
-  String.length s >= String.length pre && String.sub s 0 (String.length pre) = pre
+  String.length s >= String.length pre
+  && String.sub s 0 (String.length pre) = pre
 
 (* Start the cohttp-eio mock on an ephemeral loopback port; return its base URL.
    The server runs as a daemon fiber for the life of the switch. *)
@@ -71,8 +74,7 @@ let start_server ~sw ~env : string =
     else Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"" ()
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Cohttp_eio.Server.run socket
-        (Cohttp_eio.Server.make ~callback:handler ())
+      Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
         ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
 
@@ -103,10 +105,14 @@ let run ~env ~sw : outcome =
         ]
       in
       let r1 = Rest.insert ~env ~sw client ~table recs in
-      let r2 = Rest.insert ~env ~sw client ~table [ `Assoc [ ("id", `Int 4) ] ] in
+      let r2 =
+        Rest.insert ~env ~sw client ~table [ `Assoc [ ("id", `Int 4) ] ]
+      in
       let r_empty = Rest.insert ~env ~sw client ~table [] in
       fail_insert := true;
-      let r_err = Rest.insert ~env ~sw client ~table [ `Assoc [ ("id", `Int 5) ] ] in
+      let r_err =
+        Rest.insert ~env ~sw client ~table [ `Assoc [ ("id", `Int 5) ] ]
+      in
       fail_insert := false;
       let err_code =
         match r_err with
@@ -122,33 +128,35 @@ let run ~env ~sw : outcome =
         mints = !token_mints;
         bearer = !saw_bearer;
         basic = !saw_basic;
-        first_body = (match List.rev !insert_bodies with b :: _ -> b | [] -> "");
+        first_body =
+          (match List.rev !insert_bodies with b :: _ -> b | [] -> "");
         n_inserts = List.length !insert_bodies;
-        empty_ok = (r_empty = Ok ());
+        empty_ok = r_empty = Ok ();
         err_code;
-        path_ok = (path_ok && r1 = Ok () && r2 = Ok ());
+        path_ok = path_ok && r1 = Ok () && r2 = Ok ();
       }
 
 let result =
   lazy
-    (Eio_main.run @@ fun env ->
-     Eio.Switch.run @@ fun sw ->
-     let o = run ~env ~sw in
-     Printf.eprintf
-       "ZEROBUS OCAML — EIO REST TEST -- evidence\n\
-        ocaml_version : %s\n\
-        token_mints   : %d (expect 1 — cached across inserts)\n\
-        basic_auth_seen: %b   bearer_seen: %b\n\
-        inserts_sent  : %d (expect 3: batch, single, error; empty skipped)\n\
-        first_body    : %s\n\
-        empty_is_noop : %b\n\
-        error_code    : %s\n\
-        paths_correct : %b\n%!"
-       Sys.ocaml_version o.mints o.basic o.bearer o.n_inserts o.first_body
-       o.empty_ok
-       (match o.err_code with Some c -> string_of_int c | None -> "none")
-       o.path_ok;
-     o)
+    ( Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let o = run ~env ~sw in
+      Printf.eprintf
+        "ZEROBUS OCAML — EIO REST TEST -- evidence\n\
+         ocaml_version : %s\n\
+         token_mints   : %d (expect 1 — cached across inserts)\n\
+         basic_auth_seen: %b   bearer_seen: %b\n\
+         inserts_sent  : %d (expect 3: batch, single, error; empty skipped)\n\
+         first_body    : %s\n\
+         empty_is_noop : %b\n\
+         error_code    : %s\n\
+         paths_correct : %b\n\
+         %!"
+        Sys.ocaml_version o.mints o.basic o.bearer o.n_inserts o.first_body
+        o.empty_ok
+        (match o.err_code with Some c -> string_of_int c | None -> "none")
+        o.path_ok;
+      o )
 
 let () =
   Alcotest.run "rest-eio"
@@ -166,8 +174,8 @@ let () =
               Alcotest.(check int) "mints" 1 o.mints);
           Alcotest.test_case "records sent as one JSON array" `Quick (fun () ->
               let o = Lazy.force result in
-              Alcotest.(check bool) "json array"
-                true
+              Alcotest.(check bool)
+                "json array" true
                 (String.length o.first_body > 0
                 && o.first_body.[0] = '['
                 && o.first_body.[String.length o.first_body - 1] = ']'));

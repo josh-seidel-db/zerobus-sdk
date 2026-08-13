@@ -7,7 +7,9 @@
 ; grpc-lwt 0.1.0 provides a server.
 ;
 ; (optional): needs cohttp-async + tls-async + opentelemetry, so the dir VANISHES
-; on switches lacking them (e.g. the canonical fl414). NOT in CI.
+; on switches lacking them (e.g. the canonical fl414). Runs in the NON-BLOCKING
+; bespoke-switch CI job (.github/workflows/ci-ocaml-async-bespoke.yml) — it is the
+; Async OTLP coverage there (test_otlp_async can't run on that switch; see its dune).
 (executable
  (name test_otlp_otel_async)
  (modules test_otlp_otel_async)

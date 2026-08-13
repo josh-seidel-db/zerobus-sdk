@@ -6,7 +6,8 @@
     [IngestRecordResponse] carrying [durability_ack_up_to_offset].
 
     This is the backend the runtime-agnostic driver ({!Zerobus_core.Make}) runs
-    against, exercising create/ingest/flush/wait end to end without a live service. *)
+    against, exercising create/ingest/flush/wait end to end without a live
+    service. *)
 
 module Z = Zerobus_proto.Zerobus_service
 
@@ -81,8 +82,10 @@ let () =
        | Unix.ADDR_INET (_, p) -> p
        | _ -> requested
      in
-     let handler = H2_lwt_unix.Server.create_connection_handler ?config:None
-         ~request_handler:(fun _ reqd -> Grpc_lwt.Server.handle_request server reqd)
+     let handler =
+       H2_lwt_unix.Server.create_connection_handler ?config:None
+         ~request_handler:(fun _ reqd ->
+           Grpc_lwt.Server.handle_request server reqd)
          ~error_handler:(fun _ ?request:_ _ _ -> ())
      in
      Printf.printf "READY %d\n%!" actual_port;

@@ -1,8 +1,9 @@
 (** Cross-implementation OTLP acceptance (Eio): our {!Zerobus_otlp_eio} exporter
-    (vendored [Zerobus_otlp_proto]) against a mock collector that decodes with the
-    canonical upstream [opentelemetry.proto] types (otel_collector_eio). The Eio
-    counterpart of test_otlp_otel/test_otlp_otel_lwt.ml — proves genuine OTLP
-    wire-compatibility for the Eio exporter (independent encoder/decoder impls).
+    (vendored [Zerobus_otlp_proto]) against a mock collector that decodes with
+    the canonical upstream [opentelemetry.proto] types (otel_collector_eio). The
+    Eio counterpart of test_otlp_otel/test_otlp_otel_lwt.ml — proves genuine
+    OTLP wire-compatibility for the Eio exporter (independent encoder/decoder
+    impls).
 
     Cleartext h2c, loopback, ephemeral ports. Runs on zbeio (OCaml 5.x). *)
 
@@ -20,21 +21,23 @@ let start_token_server ~sw ~env : string =
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
   in
   let port =
-    match Eio.Net.listening_addr socket with `Tcp (_, p) -> p | `Unix _ -> failwith "no port"
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, p) -> p
+    | `Unix _ -> failwith "no port"
   in
   let handler _conn (request : Http.Request.t) _body =
     let path = Uri.path (Uri.of_string request.Http.Request.resource) in
     if path = "/oidc/v1/token" then begin
       incr token_mints;
       Cohttp_eio.Server.respond_string ~status:`OK
-        ~body:{|{"access_token":"tok-otel-1","token_type":"Bearer","expires_in":3600}|}
+        ~body:
+          {|{"access_token":"tok-otel-1","token_type":"Bearer","expires_in":3600}|}
         ()
     end
     else Cohttp_eio.Server.respond_string ~status:`Not_found ~body:"" ()
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Cohttp_eio.Server.run socket
-        (Cohttp_eio.Server.make ~callback:handler ())
+      Cohttp_eio.Server.run socket (Cohttp_eio.Server.make ~callback:handler ())
         ~on_error:(fun _ -> ()));
   Printf.sprintf "http://127.0.0.1:%d" port
 
@@ -51,7 +54,8 @@ let with_collector ~log_path (f : int -> 'a) : 'a =
   in
   let stdout_r, stdout_w = Unix.pipe () in
   let pid =
-    Unix.create_process_env exe [| exe; "0" |] env Unix.stdin stdout_w Unix.stderr
+    Unix.create_process_env exe [| exe; "0" |] env Unix.stdin stdout_w
+      Unix.stderr
   in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
@@ -102,7 +106,9 @@ type outcome = {
   collector_saw_info : bool;
 }
 
-let read_file p = try In_channel.with_open_bin p In_channel.input_all with _ -> ""
+let read_file p =
+  try In_channel.with_open_bin p In_channel.input_all with _ -> ""
+
 let contains hay needle =
   let nl = String.length needle and hl = String.length hay in
   let rec go i =
@@ -124,9 +130,12 @@ let run ~env ~sw : outcome =
       | Error e -> failwith (Zerobus_core.Error.to_string e)
       | Ok client ->
           let r_logs = Otlp.export_logs ~env ~sw client (sample_logs ()) in
-          let r_metrics = Otlp.export_metrics ~env ~sw client (sample_metrics ()) in
+          let r_metrics =
+            Otlp.export_metrics ~env ~sw client (sample_metrics ())
+          in
           let r_partial =
-            Otlp.export_logs ~env ~sw client (sample_logs ~schema_url:"REJECT1" ())
+            Otlp.export_logs ~env ~sw client
+              (sample_logs ~schema_url:"REJECT1" ())
           in
           Eio.Time.sleep (Eio.Stdenv.clock env) 0.2;
           let clog = read_file log_path in
@@ -147,16 +156,18 @@ let run ~env ~sw : outcome =
 
 let result =
   lazy
-    (Eio_main.run @@ fun env ->
-     Eio.Switch.run @@ fun sw ->
-     let o = run ~env ~sw in
-     Printf.eprintf
-       "ZEROBUS OCAML — OTLP CROSS-IMPL TEST (Eio, canonical opentelemetry.proto)\n\
-        logs ok=%b rejected=%Ld ; metrics ok=%b ; partial rejected=%Ld\n\
-        token_mints=%d ; canonical-decoded 2 logs=%b ; saw INFO=%b\n%!"
-       o.logs_ok o.logs_rejected o.metrics_ok o.partial_rejected o.mints
-       o.collector_saw_2_logs o.collector_saw_info;
-     o)
+    ( Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let o = run ~env ~sw in
+      Printf.eprintf
+        "ZEROBUS OCAML — OTLP CROSS-IMPL TEST (Eio, canonical \
+         opentelemetry.proto)\n\
+         logs ok=%b rejected=%Ld ; metrics ok=%b ; partial rejected=%Ld\n\
+         token_mints=%d ; canonical-decoded 2 logs=%b ; saw INFO=%b\n\
+         %!"
+        o.logs_ok o.logs_rejected o.metrics_ok o.partial_rejected o.mints
+        o.collector_saw_2_logs o.collector_saw_info;
+      o )
 
 let () =
   Alcotest.run "otlp-otel-eio"
@@ -171,15 +182,17 @@ let () =
               Alcotest.(check bool) "ok" true (Lazy.force result).metrics_ok);
           Alcotest.test_case "partial success surfaced (1 rejected)" `Slow
             (fun () ->
-              Alcotest.(check int64) "rej" 1L (Lazy.force result).partial_rejected);
+              Alcotest.(check int64)
+                "rej" 1L (Lazy.force result).partial_rejected);
           Alcotest.test_case "token cached (mints once)" `Slow (fun () ->
               Alcotest.(check int) "mints" 1 (Lazy.force result).mints);
           Alcotest.test_case "CANONICAL decoder read 2 log records" `Slow
             (fun () ->
-              Alcotest.(check bool) "2 logs" true
-                (Lazy.force result).collector_saw_2_logs);
+              Alcotest.(check bool)
+                "2 logs" true (Lazy.force result).collector_saw_2_logs);
           Alcotest.test_case "CANONICAL decoder read severity INFO" `Slow
             (fun () ->
-              Alcotest.(check bool) "sev" true (Lazy.force result).collector_saw_info);
+              Alcotest.(check bool)
+                "sev" true (Lazy.force result).collector_saw_info);
         ] );
     ]

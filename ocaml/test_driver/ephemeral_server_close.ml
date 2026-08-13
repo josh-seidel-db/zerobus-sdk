@@ -1,18 +1,21 @@
-(** Mock Zerobus [EphemeralStream] server that sends a graceful [CloseStreamSignal]
-    mid-way on the FIRST stream, to exercise the driver's graceful-close-then-recover
-    path ([stream_paused_max_wait_time_ms]). Separate process, cleartext h2c.
+(** Mock Zerobus [EphemeralStream] server that sends a graceful
+    [CloseStreamSignal] mid-way on the FIRST stream, to exercise the driver's
+    graceful-close-then-recover path ([stream_paused_max_wait_time_ms]).
+    Separate process, cleartext h2c.
 
     Behavior:
-    - On the FIRST bidi stream: reply to CreateIngestStream, ack records by their
-      offset_id, but after [close_after_n] acked records send a [CloseStreamSignal]
-      (with a short server duration) and then END THE BODY cleanly (Grpc.Status.OK).
-      This is the graceful case (NOT a retryable error status): the driver should
-      drain the acks it already sent, then reconnect+replay.
+    - On the FIRST bidi stream: reply to CreateIngestStream, ack records by
+      their offset_id, but after [close_after_n] acked records send a
+      [CloseStreamSignal] (with a short server duration) and then END THE BODY
+      cleanly (Grpc.Status.OK). This is the graceful case (NOT a retryable error
+      status): the driver should drain the acks it already sent, then
+      reconnect+replay.
     - A process-global flag ensures only the first stream closes gracefully; the
-      reconnected stream is served to completion (acks every replayed + new record).
+      reconnected stream is served to completion (acks every replayed + new
+      record).
 
-    Acks carry [durability_ack_up_to_offset] = the record's own offset_id, so the
-    driver's monotonic watermark advances across the reconnect. *)
+    Acks carry [durability_ack_up_to_offset] = the record's own offset_id, so
+    the driver's monotonic watermark advances across the reconnect. *)
 
 module Z = Zerobus_proto.Zerobus_service
 
@@ -23,8 +26,7 @@ let already_closed = ref false
    CloseStreamSignal (server duration advertised as 10s), so a finite
    stream_paused_max_wait_time_ms cap must fire BEFORE the body ends — proving the
    cap, not body-end, drives the reconnect. Default (no flag) ends the body at once. *)
-let slow_mode =
-  Array.length Sys.argv > 2 && String.equal Sys.argv.(2) "slow"
+let slow_mode = Array.length Sys.argv > 2 && String.equal Sys.argv.(2) "slow"
 let slow_hold_s = 10.0
 
 let decode_req (s : string) : Z.ephemeral_stream_request =
@@ -65,7 +67,8 @@ let handle (requests : string Lwt_stream.t) (respond : string -> unit) :
                      body-end). *)
                   let secs = if slow_mode then 10L else 1L in
                   let dur =
-                    Zerobus_proto.Duration.make_duration ~seconds:secs ~nanos:0l ()
+                    Zerobus_proto.Duration.make_duration ~seconds:secs ~nanos:0l
+                      ()
                   in
                   respond
                     (encode_resp
@@ -124,7 +127,8 @@ let () =
      in
      let handler =
        H2_lwt_unix.Server.create_connection_handler ?config:None
-         ~request_handler:(fun _ reqd -> Grpc_lwt.Server.handle_request server reqd)
+         ~request_handler:(fun _ reqd ->
+           Grpc_lwt.Server.handle_request server reqd)
          ~error_handler:(fun _ ?request:_ _ _ -> ())
      in
      Printf.printf "READY %d\n%!" actual_port;

@@ -1,10 +1,11 @@
 (** Unit test for Zerobus_core.Flight_protocol.decode_ack defensiveness (#5).
 
-    A Flight [PutResult] whose [app_metadata] carries no parseable offset (empty, a
-    schema-accept, or a heartbeat) must NOT be treated as a fatal Protocol_error —
-    that would kill the whole Arrow stream on the first such frame. It must decode
-    to [Created] (keep-reading, no watermark advance). A well-formed ack still
-    decodes to [Watermark], and genuinely undecodable bytes are still an error. *)
+    A Flight [PutResult] whose [app_metadata] carries no parseable offset
+    (empty, a schema-accept, or a heartbeat) must NOT be treated as a fatal
+    Protocol_error — that would kill the whole Arrow stream on the first such
+    frame. It must decode to [Created] (keep-reading, no watermark advance). A
+    well-formed ack still decodes to [Watermark], and genuinely undecodable
+    bytes are still an error. *)
 
 module FP = Zerobus_core.Flight_protocol
 module F = Zerobus_proto.Flight
@@ -24,7 +25,8 @@ let check_created label meta =
       | Ok (Zerobus_core.Stream.Closed _) ->
           Alcotest.failf "%s: expected Created, got Closed" label
       | Error e ->
-          Alcotest.failf "%s: expected Created (keep-reading), got Error %s" label
+          Alcotest.failf "%s: expected Created (keep-reading), got Error %s"
+            label
             (Zerobus_core.Error.to_string e))
 
 let check_watermark label meta expected =
@@ -46,7 +48,8 @@ let () =
           check_created "non-offset-json" {|{"note":"schema accepted"}|};
           check_created "garbage-text" "not-an-offset";
           (* A real ack still advances the watermark. *)
-          check_watermark "ack-up-to-offset-json" {|{"ack_up_to_offset":42}|} 42L;
+          check_watermark "ack-up-to-offset-json" {|{"ack_up_to_offset":42}|}
+            42L;
           check_watermark "offset-id-json" {|{"offset_id":7}|} 7L;
           check_watermark "bare-int" "123" 123L;
         ] );

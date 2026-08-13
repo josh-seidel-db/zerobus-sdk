@@ -1,8 +1,8 @@
 (** Phase 5 acceptance on the Eio runtime: the real streaming driver
     ({!Zerobus_core.Make}) over the direct-style Eio instantiation, against the
     mock [EphemeralStream] server (separate process, cleartext h2c). Proves the
-    same loop-then-flush data plane the Lwt test proves — create_stream, ingest N
-    records (queue-only), flush once, assert all acked, close — but on Eio
+    same loop-then-flush data plane the Lwt test proves — create_stream, ingest
+    N records (queue-only), flush once, assert all acked, close — but on Eio
     (effects/fibers, no monad).
 
     Runs on the zbeio switch (OCaml 5.2). Separate-process topology (the proven
@@ -24,7 +24,9 @@ let server_exe () =
 let with_server (f : unit -> 'a) : 'a =
   let exe = server_exe () in
   let stdout_r, stdout_w = Unix.pipe () in
-  let pid = Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr in
+  let pid =
+    Unix.create_process exe [| exe; "0" |] Unix.stdin stdout_w Unix.stderr
+  in
   Unix.close stdout_w;
   let ic = Unix.in_channel_of_descr stdout_r in
   (try
@@ -36,7 +38,7 @@ let with_server (f : unit -> 'a) : 'a =
     ~finally:(fun () ->
       (try Unix.kill pid Sys.sigkill with _ -> ());
       (try ignore (Unix.waitpid [] pid) with _ -> ());
-      (try close_in ic with _ -> ()))
+      try close_in ic with _ -> ())
     f
 
 type result = { acked_last : bool; issued : int; err : string option }
@@ -56,37 +58,47 @@ let run_driver ~net () : result =
           ~options ~table scope
       with
       | Error e ->
-          { acked_last = false; issued = 0;
-            err = Some (Zerobus_core.Error.to_string e) }
-      | Ok stream ->
+          {
+            acked_last = false;
+            issued = 0;
+            err = Some (Zerobus_core.Error.to_string e);
+          }
+      | Ok stream -> (
           (* loop-then-flush: queue N records, do NOT wait per record *)
           let rec loop i last =
             if i >= n_records then Ok last
             else
               match
-                Z.ingest stream (Bytes.of_string (Printf.sprintf {|{"id":%d}|} i))
+                Z.ingest stream
+                  (Bytes.of_string (Printf.sprintf {|{"id":%d}|} i))
               with
               | Ok off -> loop (i + 1) (Some off)
               | Error _ as e -> e
           in
-          (match loop 0 None with
-           | Error e ->
-               { acked_last = false; issued = 0;
-                 err = Some (Zerobus_core.Error.to_string e) }
-           | Ok last_off ->
-               (* flush once — wait for all pending acks *)
-               let flush_r = Z.flush stream in
-               let _ = Z.close stream in
-               let acked_last =
-                 match (flush_r, last_off) with
-                 | Ok (), Some _ -> true
-                 | _ -> false
-               in
-               { acked_last; issued = n_records;
-                 err =
-                   (match flush_r with
-                    | Error e -> Some (Zerobus_core.Error.to_string e)
-                    | Ok () -> None) }))
+          match loop 0 None with
+          | Error e ->
+              {
+                acked_last = false;
+                issued = 0;
+                err = Some (Zerobus_core.Error.to_string e);
+              }
+          | Ok last_off ->
+              (* flush once — wait for all pending acks *)
+              let flush_r = Z.flush stream in
+              let _ = Z.close stream in
+              let acked_last =
+                match (flush_r, last_off) with
+                | Ok (), Some _ -> true
+                | _ -> false
+              in
+              {
+                acked_last;
+                issued = n_records;
+                err =
+                  (match flush_r with
+                  | Error e -> Some (Zerobus_core.Error.to_string e)
+                  | Ok () -> None);
+              }))
 
 let result =
   lazy
@@ -99,7 +111,8 @@ let result =
             ocaml_version : %s\n\
             records_issued: %d\n\
             flush_all_acked: %b\n\
-            error         : %s\n%!"
+            error         : %s\n\
+            %!"
            Sys.ocaml_version r.issued r.acked_last
            (match r.err with Some e -> e | None -> "none");
          r))

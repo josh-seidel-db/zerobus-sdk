@@ -1,21 +1,23 @@
 (** The runtime-agnostic streaming driver (DESIGN.md §5, §6.4), functorized over
     {!Io.IO}. This is the real Phase 5 data plane: [create_stream], [ingest] /
-    [ingest_records] (queue-only, never wait — the cardinal rule), [wait_for_offset],
-    [flush], [close], plus the async [ack_callback]. It runs the send side and an
-    ack-reader daemon concurrently inside the stream's {!Io.IO.Scope}, coordinating
-    through the mailbox/condition primitives the functor provides.
+    [ingest_records] (queue-only, never wait — the cardinal rule),
+    [wait_for_offset], [flush], [close], plus the async [ack_callback]. It runs
+    the send side and an ack-reader daemon concurrently inside the stream's
+    {!Io.IO.Scope}, coordinating through the mailbox/condition primitives the
+    functor provides.
 
-    {b Protocol abstraction (Phase 7b).} The offset/ack/watermark/recovery control
-    plane is wire-agnostic; only four operations are specific to the on-the-wire
-    protocol — the RPC name, how a create/schema frame and a record frame are
-    built, and how a response frame decodes to an ack watermark. Those live behind
-    {!PROTOCOL}. The default {!Ephemeral} instance speaks the Zerobus
-    [EphemeralStream] RPC (JSON/Proto, ack in [durability_ack_up_to_offset]); an
-    Arrow instance can speak Flight [DoPut] (IPC bytes in [FlightData.data_body],
-    ack in [PutResult.app_metadata]) by supplying a different {!PROTOCOL} to
-    {!Make_with_protocol} — WITHOUT this module (or [lib/core]) depending on the
-    Flight proto or libarrow. {!Make} = {!Make_with_protocol} over {!Ephemeral},
-    so the existing single-arg [Zerobus_core.Make (Io)] API is unchanged.
+    {b Protocol abstraction (Phase 7b).} The offset/ack/watermark/recovery
+    control plane is wire-agnostic; only four operations are specific to the
+    on-the-wire protocol — the RPC name, how a create/schema frame and a record
+    frame are built, and how a response frame decodes to an ack watermark. Those
+    live behind {!PROTOCOL}. The default {!Ephemeral} instance speaks the
+    Zerobus [EphemeralStream] RPC (JSON/Proto, ack in
+    [durability_ack_up_to_offset]); an Arrow instance can speak Flight [DoPut]
+    (IPC bytes in [FlightData.data_body], ack in [PutResult.app_metadata]) by
+    supplying a different {!PROTOCOL} to {!Make_with_protocol} — WITHOUT this
+    module (or [lib/core]) depending on the Flight proto or libarrow. {!Make} =
+    {!Make_with_protocol} over {!Ephemeral}, so the existing single-arg
+    [Zerobus_core.Make (Io)] API is unchanged.
 
     Recovery (§12.3) is Phase 6: reconnect-and-replay of the un-acked buffer. *)
 
@@ -23,29 +25,32 @@ module Wire = Zerobus_proto.Zerobus_service
 
 (** What a decoded response frame means to the driver's control plane. *)
 type ack =
-  | Watermark of int64  (** durability watermark: all offsets <= n are durable *)
+  | Watermark of int64
+      (** durability watermark: all offsets <= n are durable *)
   | Created  (** stream/schema accepted; not an ack, keep reading *)
   | Closed of int
       (** server signalled it will close the stream in [n] ms (0 if the signal
           carried no duration). Honored via [stream_paused_max_wait_time_ms]. *)
 
 (** The on-the-wire protocol the driver runs over. Everything else in the driver
-    (offsets, watermark, waiters, recovery, replay buffer) is protocol-agnostic. *)
+    (offsets, watermark, waiters, recovery, replay buffer) is protocol-agnostic.
+*)
 module type PROTOCOL = sig
   val service : string
   val rpc : string
 
-  (** Build the framed create/schema request sent first (and re-sent on
-      reconnect), from the table + options. *)
   val create_frame :
     table:Options.table_properties -> options:Options.stream_options -> string
+  (** Build the framed create/schema request sent first (and re-sent on
+      reconnect), from the table + options. *)
 
-  (** Build the framed record request for one record at [offset]. *)
   val record_frame :
     record_type:Options.record_type -> offset:int64 -> bytes -> string
+  (** Build the framed record request for one record at [offset]. *)
 
-  (** Decode a response frame into an {!ack}, or an error on a malformed frame. *)
   val decode_ack : string -> (ack, Error.t) result
+  (** Decode a response frame into an {!ack}, or an error on a malformed frame.
+  *)
 end
 
 (** The Zerobus [EphemeralStream] protocol (JSON/Proto). This is the default and
@@ -86,7 +91,9 @@ module Ephemeral : PROTOCOL = struct
          (Wire.make_ingest_record_request ~offset_id:offset ~record ()))
 
   let decode_ack (s : string) : (ack, Error.t) result =
-    match Wire.decode_pb_ephemeral_stream_response (Pbrt.Decoder.of_string s) with
+    match
+      Wire.decode_pb_ephemeral_stream_response (Pbrt.Decoder.of_string s)
+    with
     | Wire.Ingest_record_response ack ->
         Ok (Watermark ack.Wire.durability_ack_up_to_offset)
     | Wire.Create_stream_response _ -> Ok Created
@@ -99,7 +106,8 @@ module Ephemeral : PROTOCOL = struct
               Int64.to_int
                 (Int64.add
                    (Int64.mul d.Zerobus_proto.Duration.seconds 1000L)
-                   (Int64.of_int32 (Int32.div d.Zerobus_proto.Duration.nanos 1_000_000l)))
+                   (Int64.of_int32
+                      (Int32.div d.Zerobus_proto.Duration.nanos 1_000_000l)))
           | None -> 0
         in
         Ok (Closed ms)
@@ -116,8 +124,8 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
      finishes within [ms], else [Error (Timeout ...)]. [ms <= 0] disables the timer
      (runs [f] unbounded). Built on {!Io.first} (abandons the loser — on Lwt/Eio the
      loser is cancelled; on Async detached, so [f] must be safe to abandon). *)
-  let with_timeout ~ms ~(label : string) (f : unit -> ('a, Error.t) result Io.t) :
-      ('a, Error.t) result Io.t =
+  let with_timeout ~ms ~(label : string) (f : unit -> ('a, Error.t) result Io.t)
+      : ('a, Error.t) result Io.t =
     if ms <= 0 then f ()
     else
       Io.first f (fun () ->
@@ -136,31 +144,34 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
 
   type stream = {
     options : Options.stream_options;
-    scope : Scope.t;  (* the stream's lifetime scope; timeout timers fork here *)
-    state_lock : Mutex.t;  (* guards the mutable fields below *)
+    scope : Scope.t; (* the stream's lifetime scope; timeout timers fork here *)
+    state_lock : Mutex.t; (* guards the mutable fields below *)
     (* The active bidi call; swapped by recovery on a retryable failure. Guarded
        against concurrent send during a reconnect by [send_lock]. *)
     mutable call : Io.H2_client.call;
-    send_lock : Mutex.t;  (* serializes sends + the call swap during recovery *)
+    send_lock : Mutex.t; (* serializes sends + the call swap during recovery *)
     (* Reconnect inputs, captured at open (§12.3): enough to re-establish the
        stream and replay. Headers/create are re-sent verbatim on reconnect. *)
     conn : Io.H2_client.connection;
-    create_request : string;  (* framed create/schema request, re-sent first *)
+    create_request : string; (* framed create/schema request, re-sent first *)
     service : string;
     rpc : string;
     reconnect_headers : (string * string) list;
-    mutable next_offset : int64;  (* next offset to assign *)
-    mutable last_acked : int64;  (* highest durably-acked offset; -1 = none *)
-    mutable last_issued : int64;  (* highest offset handed to ingest; -1 = none *)
-    mutable fatal : Error.t option;  (* set on a fatal stream/transport error *)
+    mutable next_offset : int64; (* next offset to assign *)
+    mutable last_acked : int64; (* highest durably-acked offset; -1 = none *)
+    mutable last_issued : int64;
+        (* highest offset handed to ingest; -1 = none *)
+    mutable fatal : Error.t option; (* set on a fatal stream/transport error *)
     mutable closed : bool;
-    mutable waiters : waiter list;  (* pending wait_for_offset / flush waiters *)
+    mutable waiters : waiter list; (* pending wait_for_offset / flush waiters *)
     (* Un-acked replay buffer for recovery (§12.3): (offset, framed-bytes) from
        last_acked+1 forward, newest first. Bounded by [max_inflight_requests] AND
        [inflight_limit_bytes] — but NEVER dropped (see [overflow_policy]). *)
-    mutable unacked : (int64 * string) list;  (* newest first *)
-    mutable unacked_bytes : int;  (* running byte total of [unacked] (O(1) upkeep) *)
-    inflight_limit_bytes : int;  (* byte ceiling, resolved at open from options/mem *)
+    mutable unacked : (int64 * string) list; (* newest first *)
+    mutable unacked_bytes : int;
+        (* running byte total of [unacked] (O(1) upkeep) *)
+    inflight_limit_bytes : int;
+    (* byte ceiling, resolved at open from options/mem *)
     (* Producers parked by [overflow_policy = Block] until the ack-reader drains the
        buffer below the bound; woken (capacity-1 box each) when space frees up. *)
     mutable space_waiters : unit Mailbox.t list;
@@ -223,12 +234,14 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
      runs here, OUTSIDE the state lock. *)
   let notify_failed s err (failed : (int64 * unit Mailbox.t) list) =
     (match s.options.Options.ack_callback with
-     | Some cb ->
-         List.iter
-           (fun (target, _) ->
-             cb.Options.on_error (Options.offset_of_int64 target) (Error.to_string err))
-           failed
-     | None -> ());
+    | Some cb ->
+        List.iter
+          (fun (target, _) ->
+            cb.Options.on_error
+              (Options.offset_of_int64 target)
+              (Error.to_string err))
+          failed
+    | None -> ());
     let* space_boxes =
       Mutex.with_lock s.state_lock (fun () ->
           let ws = s.space_waiters in
@@ -313,8 +326,9 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
       (* Fire [on_ack] only when the watermark actually advanced, and with the new
          [last_acked] (== watermark here) — never a stale/decreasing value. *)
       (match (advanced, s.options.Options.ack_callback) with
-       | true, Some cb -> cb.Options.on_ack (Options.offset_of_int64 s.last_acked)
-       | _ -> ());
+      | true, Some cb ->
+          cb.Options.on_ack (Options.offset_of_int64 s.last_acked)
+      | _ -> ());
       let* () = notify_all boxes in
       notify_all space_boxes
     in
@@ -324,30 +338,31 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
       let this_call = s.call in
       let* r = Io.H2_client.recv this_call in
       match r with
-      | Ok None ->
+      | Ok None -> (
           (* End of the response body. Distinguish a clean OK end from a
              retryable non-OK status (which lives in the trailer, not in recv):
              a broken stream ends the body too, so [recv]=None alone is ambiguous. *)
           let* st = Io.H2_client.status this_call in
-          (match st with
-           | Ok () ->
-               (* Clean server end. Any waiter still pending (target > last_acked)
+          match st with
+          | Ok () ->
+              (* Clean server end. Any waiter still pending (target > last_acked)
                   will NEVER be satisfied — the ack-reader is terminating and no more
                   acks are coming. Fail those fast (firing on_error) instead of
                   leaving flush/wait_for_offset to block until their own timeout. If
                   none pend, this is a normal clean close (empty fail list). *)
-               let err =
-                 Error.Stream_error "server closed the stream before all records acked"
-               in
-               let* failed =
-                 Mutex.with_lock s.state_lock (fun () ->
-                     (* Only mark fatal when waiters actually pend; a clean close with
+              let err =
+                Error.Stream_error
+                  "server closed the stream before all records acked"
+              in
+              let* failed =
+                Mutex.with_lock s.state_lock (fun () ->
+                    (* Only mark fatal when waiters actually pend; a clean close with
                         nothing outstanding must NOT poison [s.fatal]. *)
-                     if s.waiters = [] then return []
-                     else return (fail_all s err))
-               in
-               notify_failed s err failed
-           | Error err -> on_failure err)
+                    if s.waiters = [] then return []
+                    else return (fail_all s err))
+              in
+              notify_failed s err failed
+          | Error err -> on_failure err)
       | Ok (Some raw) -> (
           match P.decode_ack raw with
           | Ok (Watermark watermark) ->
@@ -363,7 +378,9 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
       in
       if recovered then loop ()
       else
-        let* failed = Mutex.with_lock s.state_lock (fun () -> return (fail_all s err)) in
+        let* failed =
+          Mutex.with_lock s.state_lock (fun () -> return (fail_all s err))
+        in
         notify_failed s err failed
     (* Reconnect+replay after a graceful close, through the SAME bounded, retryable
        recovery path as [on_failure] (capped by [recovery_retries], gated on
@@ -397,7 +414,8 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
               let* () = advance_watermark watermark in
               drain_until_close ()
           | Ok Created -> drain_until_close ()
-          | Ok (Closed _) -> drain_until_close () (* already closing; keep draining *)
+          | Ok (Closed _) ->
+              drain_until_close () (* already closing; keep draining *)
           | Error _ -> return (Ok ()))
       | Error _ -> return (Ok ())
     (* Graceful close: the server signalled it will close the stream in [server_ms].
@@ -419,7 +437,9 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
         let err =
           Error.Stream_error "server closed the stream (recovery disabled)"
         in
-        let* failed = Mutex.with_lock s.state_lock (fun () -> return (fail_all s err)) in
+        let* failed =
+          Mutex.with_lock s.state_lock (fun () -> return (fail_all s err))
+        in
         notify_failed s err failed
       else
         match o.Options.stream_paused_max_wait_time_ms with
@@ -433,7 +453,8 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
                [with_timeout] returns the drain's [Ok ()] or [Error Timeout] — both
                lead to the same reconnect, so the timeout marker is just discarded. *)
             let* _ =
-              with_timeout ~ms:cap ~label:"graceful-close drain" drain_until_close
+              with_timeout ~ms:cap ~label:"graceful-close drain"
+                drain_until_close
             in
             reconnect_after_close ()
     in
@@ -461,7 +482,7 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
         in
         match call_r with
         | Error _ as e -> return e
-        | Ok call ->
+        | Ok call -> (
             let create_request = P.create_frame ~table ~options in
             let* send_r = Io.H2_client.send call create_request in
             match send_r with
@@ -500,7 +521,7 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
                   }
                 in
                 fork_daemon scope (ack_reader s);
-                return (Ok s))
+                return (Ok s)))
 
   (* ---- ingestion (queue-only; never wait — the cardinal rule) ---- *)
 
@@ -534,7 +555,8 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
           match s.fatal with
           | Some e -> return (`Err e)
           | None ->
-              if s.closed then return (`Err (Error.Stream_error "ingest after close"))
+              if s.closed then
+                return (`Err (Error.Stream_error "ingest after close"))
               else
                 (* We must know the size to check the byte bound, but size depends on
                    the frame which depends on the offset. Peek the offset without
@@ -547,18 +569,19 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
                   | Options.Fail ->
                       return
                         (`Err
-                          (Error.Backpressure
-                             (Printf.sprintf
-                                "un-acked buffer full (%d records / %d bytes, limit \
-                                 %d records / %d bytes) — flush or retry"
-                                (List.length s.unacked) s.unacked_bytes
-                                s.options.Options.max_inflight_requests
-                                s.inflight_limit_bytes)))
+                           (Error.Backpressure
+                              (Printf.sprintf
+                                 "un-acked buffer full (%d records / %d bytes, \
+                                  limit %d records / %d bytes) — flush or \
+                                  retry"
+                                 (List.length s.unacked) s.unacked_bytes
+                                 s.options.Options.max_inflight_requests
+                                 s.inflight_limit_bytes)))
                   | Options.Block ->
-                      if s.unacked = [] then (
+                      if s.unacked = [] then
                         (* oversized-but-empty: admit to avoid deadlock *)
                         let off = reserve_slot s framed in
-                        return (`Send (off, framed)))
+                        return (`Send (off, framed))
                       else begin
                         let box = Mailbox.create ~capacity:1 in
                         s.space_waiters <- box :: s.space_waiters;
@@ -572,16 +595,18 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
     | `Err e -> return (Error e)
     | `Wait box ->
         let* _ = Mailbox.take box in
-        ingest_encoded s make (* retry after room frees (or the stream failed) *)
-    | `Send (off, framed) ->
+        ingest_encoded s
+          make (* retry after room frees (or the stream failed) *)
+    | `Send (off, framed) -> (
         (* send under send_lock so a concurrent recovery call-swap doesn't race the
            write; [s.call] is read inside the lock. *)
         let* send_r =
-          Mutex.with_lock s.send_lock (fun () -> Io.H2_client.send s.call framed)
+          Mutex.with_lock s.send_lock (fun () ->
+              Io.H2_client.send s.call framed)
         in
-        (match send_r with
-         | Ok () -> return (Ok (Options.offset_of_int64 off))
-         | Error e -> return (Error e))
+        match send_r with
+        | Ok () -> return (Ok (Options.offset_of_int64 off))
+        | Error e -> return (Error e))
 
   let ingest (s : stream) (record : bytes) : (offset, Error.t) result Io.t =
     ingest_encoded s (fun off ->
@@ -597,7 +622,9 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
           | None -> return (Error (Error.Stream_error "ingest_records: empty")))
       | r :: rest -> (
           let* res = ingest s r in
-          match res with Ok off -> loop (Some off) rest | Error _ as e -> return e)
+          match res with
+          | Ok off -> loop (Some off) rest
+          | Error _ as e -> return e)
     in
     loop None records
 
@@ -637,7 +664,7 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
     match already with
     | `Done -> return (Ok ())
     | `Fatal e -> return (Error e)
-    | `Wait w ->
+    | `Wait w -> (
         (* Fork a one-shot timeout timer into the stream scope: on expiry, if the
            waiter is still pending, claim it and wake it (it will observe a
            timeout below since neither the watermark nor [fatal] was reached). *)
@@ -645,21 +672,23 @@ module Make_with_protocol (Io : Io.IO) (P : PROTOCOL) = struct
           fork_daemon s.scope (fun () ->
               let* () = Io.sleep (float_of_int timeout_ms /. 1000.) in
               let* box = claim_waiter s w in
-              match box with Some mbox -> Mailbox.put mbox () | None -> return ());
+              match box with
+              | Some mbox -> Mailbox.put mbox ()
+              | None -> return ());
         let* _ = Mailbox.take w.mbox in
         (* Waking reason, in priority order: fatal error, target reached, else the
            only remaining cause is the timeout timer. *)
-        (match s.fatal with
-         | Some e -> return (Error e)
-         | None ->
-             if s.last_acked >= target then return (Ok ())
-             else
-               return
-                 (Error
-                    (Error.Timeout
-                       (Printf.sprintf
-                          "no durability ack for offset %Ld within %dms"
-                          target timeout_ms))))
+        match s.fatal with
+        | Some e -> return (Error e)
+        | None ->
+            if s.last_acked >= target then return (Ok ())
+            else
+              return
+                (Error
+                   (Error.Timeout
+                      (Printf.sprintf
+                         "no durability ack for offset %Ld within %dms" target
+                         timeout_ms))))
 
   (* Wait until the durability watermark reaches [target], or the stream fails,
      bounded by [server_lack_of_ack_timeout_ms] (the ack watchdog). *)

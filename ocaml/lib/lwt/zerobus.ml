@@ -3,17 +3,27 @@
     This module bridges {!Zerobus_core.Make(Zerobus_io_lwt)} to provide an
     ergonomic entry point: [create] constructs a client from workspace
     credentials, and [create_stream] mints a table-scoped OAuth token, opens a
-    stream to the gRPC endpoint, and returns a live [stream] ready for ingestion.
+    stream to the gRPC endpoint, and returns a live [stream] ready for
+    ingestion.
 
     The cardinal rule of ingestion: queue records in a loop, then call [flush]
-    once. Per-record waiting defeats pipelining and loses orders of magnitude
-    of throughput. *)
+    once. Per-record waiting defeats pipelining and loses orders of magnitude of
+    throughput. *)
 
 module Core = Zerobus_core
 module Io_lwt = Zerobus_io_lwt
 
 let ( let* ) = Lwt.bind
 
+type t = {
+  workspace_url : string;
+  workspace_id : string;
+  endpoint_host : string;
+  endpoint_port : int;
+  application_name : string option; [@ocaml.warning "-69"]
+  mutable token_cache : (string * float) option;
+  token_cache_lock : Lwt_mutex.t;
+}
 (** A Zerobus client holds workspace credentials and endpoint metadata.
 
     The public type is opaque; it holds:
@@ -21,39 +31,32 @@ let ( let* ) = Lwt.bind
     - workspace_id: extracted workspace-id
     - endpoint_host, endpoint_port: the gRPC endpoint
     - application_name: optional name for diagnostics
-    - token_cache: Lwt_mutex-guarded (token, expiry) ref for OAuth token caching *)
-type t = {
-  workspace_url : string;
-  workspace_id : string;
-  endpoint_host : string;
-  endpoint_port : int;
-  application_name : string option [@ocaml.warning "-69"];
-  mutable token_cache : (string * float) option;
-  token_cache_lock : Lwt_mutex.t;
-}
+    - token_cache: Lwt_mutex-guarded (token, expiry) ref for OAuth token caching
+*)
 
 (** The concrete driver behind a stream: the default [EphemeralStream] driver
     (JSON/Proto) or the Arrow/Flight [DoPut] driver, chosen by [record_type] at
-    open time. Both are the same runtime-generic driver over the Lwt IO, differing
-    only in the wire protocol — so each op just dispatches to the right one. *)
+    open time. Both are the same runtime-generic driver over the Lwt IO,
+    differing only in the wire protocol — so each op just dispatches to the
+    right one. *)
 type stream_impl =
   | Ephemeral of Io_lwt.Stream.stream
   | Flight of Io_lwt.Stream_flight.stream
 
+type stream = {
+  impl : stream_impl;
+  scope : Io_lwt.Scope.t;
+  table_name : string; [@ocaml.warning "-69"]
+}
 (** A live stream bound to a long-lived scope (§5.2, §5.3).
 
     The stream holds:
     - impl: the concrete driver stream (EphemeralStream or Flight/DoPut)
     - scope: the Io_lwt.Scope.t that keeps the ack-reader alive
     - table_name: for error diagnostics *)
-type stream = {
-  impl : stream_impl;
-  scope : Io_lwt.Scope.t;
-  table_name : string [@ocaml.warning "-69"];
-}
 
-(** An error handle is an offset the caller can wait on (DESIGN.md §5.3(a)). *)
 type offset = Core.Options.offset
+(** An error handle is an offset the caller can wait on (DESIGN.md §5.3(a)). *)
 
 (** The three offset-based ingestion operations (re-exported from core). *)
 
@@ -83,8 +86,7 @@ let flush stream =
 
 (** Close the stream and tear down its scope (cancels ack-reader).
 
-    Idempotent: safe to call multiple times or after an error.
-*)
+    Idempotent: safe to call multiple times or after an error. *)
 let close stream =
   let* result =
     match stream.impl with
@@ -93,16 +95,19 @@ let close stream =
   in
   (* Cancel and join all scope daemons *)
   List.iter Lwt.cancel stream.scope.daemons;
-  let* () = Lwt.join
-    (List.map
-      (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
-      stream.scope.daemons)
+  let* () =
+    Lwt.join
+      (List.map
+         (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
+         stream.scope.daemons)
   in
   Lwt.return result
 
-(** Re-export table_properties and stream_options for convenience. *)
 type table_properties = Core.Options.table_properties
+(** Re-export table_properties and stream_options for convenience. *)
+
 type stream_options = Core.Options.stream_options
+
 let default_stream_options = Core.Options.default_stream_options
 
 (* Open the stream on the driver selected by [record_type]: Arrow → the Flight
@@ -110,8 +115,8 @@ let default_stream_options = Core.Options.default_stream_options
    the same Lwt IO + scope; only the wire protocol differs. Returns the wrapped
    [stream_impl] (or the driver's error). *)
 let open_impl ~host ~port ~tls ~headers ~(options : stream_options)
-    ~(table : table_properties) scope :
-    (stream_impl, Core.Error.t) result Lwt.t =
+    ~(table : table_properties) scope : (stream_impl, Core.Error.t) result Lwt.t
+    =
   match options.Core.Options.record_type with
   | Core.Options.Arrow ->
       let* r =
@@ -121,7 +126,8 @@ let open_impl ~host ~port ~tls ~headers ~(options : stream_options)
       Lwt.return (Result.map (fun s -> Flight s) r)
   | Core.Options.Json | Core.Options.Proto ->
       let* r =
-        Io_lwt.Stream.open_stream ~host ~port ~tls ~headers ~options ~table scope
+        Io_lwt.Stream.open_stream ~host ~port ~tls ~headers ~options ~table
+          scope
       in
       Lwt.return (Result.map (fun s -> Ephemeral s) r)
 
@@ -134,33 +140,38 @@ let open_impl ~host ~port ~tls ~headers ~(options : stream_options)
 
     The [application_name] is optional and used for user-agent headers (future).
 
-    Raises [Auth_error] or [Transport_error] if the workspace URL cannot be parsed.
-*)
+    Raises [Auth_error] or [Transport_error] if the workspace URL cannot be
+    parsed. *)
 let create ?(application_name : string option) ~endpoint ~workspace_url () :
     (t, Core.Error.t) result Lwt.t =
   try
-    let* wsid_result = Lwt.return (Core.Config.workspace_id_of_url workspace_url) in
+    let* wsid_result =
+      Lwt.return (Core.Config.workspace_id_of_url workspace_url)
+    in
     match wsid_result with
     | Error e -> Lwt.return (Error e)
-    | Ok wsid ->
-        let* endpoint_result = Lwt.return (
-          Core.Config.endpoint_of_workspace ~endpoint ~workspace_url
-        ) in
-        (match endpoint_result with
+    | Ok wsid -> (
+        let* endpoint_result =
+          Lwt.return
+            (Core.Config.endpoint_of_workspace ~endpoint ~workspace_url)
+        in
+        match endpoint_result with
         | Error e -> Lwt.return (Error e)
         | Ok (host, port) ->
-            let client = {
-              workspace_url;
-              workspace_id = wsid;
-              endpoint_host = host;
-              endpoint_port = port;
-              application_name;
-              token_cache = None;
-              token_cache_lock = Lwt_mutex.create ();
-            } in
+            let client =
+              {
+                workspace_url;
+                workspace_id = wsid;
+                endpoint_host = host;
+                endpoint_port = port;
+                application_name;
+                token_cache = None;
+                token_cache_lock = Lwt_mutex.create ();
+              }
+            in
             Lwt.return (Ok client))
-  with
-  | exn -> Lwt.return (Error (Core.Error.Transport_error (Printexc.to_string exn)))
+  with exn ->
+    Lwt.return (Error (Core.Error.Transport_error (Printexc.to_string exn)))
 
 (** Mint a table-scoped OAuth token via client-credentials grant.
 
@@ -170,51 +181,57 @@ let create ?(application_name : string option) ~endpoint ~workspace_url () :
     - resource=api://databricks/workspaces/<workspace_id>/zerobusDirectWriteApi
     - authorization_details: UC privileges for the table (catalog/schema/table)
 
-    The token is cached with its expiry; tokens are refreshed ~30s before expiry.
+    The token is cached with its expiry; tokens are refreshed ~30s before
+    expiry.
 
-    Returns [Auth_error] on HTTP failure or malformed response.
-*)
+    Returns [Auth_error] on HTTP failure or malformed response. *)
 let mint_token ~client ~table ~client_id ~client_secret :
     (string, Core.Error.t) result Lwt.t =
-  Lwt_mutex.with_lock client.token_cache_lock
-    (fun () ->
+  Lwt_mutex.with_lock client.token_cache_lock (fun () ->
       (* Check if we have a cached token that is still fresh (30s buffer) *)
       let now = Unix.gettimeofday () in
-      (match client.token_cache with
-      | Some (token, expiry) when now +. 30.0 < expiry ->
-          Lwt.return (Ok token)
-      | _ ->
+      match client.token_cache with
+      | Some (token, expiry) when now +. 30.0 < expiry -> Lwt.return (Ok token)
+      | _ -> (
           (* Build the token request body *)
-          let* body_result = Lwt.return (
-            Core.Config.oauth_token_request_body
-              ~workspace_id:client.workspace_id
-              ~table
-          ) in
-          (match body_result with
+          let* body_result =
+            Lwt.return
+              (Core.Config.oauth_token_request_body
+                 ~workspace_id:client.workspace_id ~table)
+          in
+          match body_result with
           | Error e -> Lwt.return (Error e)
-          | Ok body ->
+          | Ok body -> (
               (* POST to the token endpoint *)
               let token_url = client.workspace_url ^ "/oidc/v1/token" in
-              let basic = Base64.encode_string (client_id ^ ":" ^ client_secret) in
-              let headers = Cohttp.Header.of_list [
-                ("Content-Type", "application/x-www-form-urlencoded");
-                ("Authorization", "Basic " ^ basic);
-              ] in
-              (try
+              let basic =
+                Base64.encode_string (client_id ^ ":" ^ client_secret)
+              in
+              let headers =
+                Cohttp.Header.of_list
+                  [
+                    ("Content-Type", "application/x-www-form-urlencoded");
+                    ("Authorization", "Basic " ^ basic);
+                  ]
+              in
+              try
                 let* resp, resp_body =
-                  Cohttp_lwt_unix.Client.post
-                    ~headers
+                  Cohttp_lwt_unix.Client.post ~headers
                     ~body:(Cohttp_lwt.Body.of_string body)
                     (Uri.of_string token_url)
                 in
-                let status = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
+                let status =
+                  Cohttp.Response.status resp |> Cohttp.Code.code_of_status
+                in
                 let* resp_str = Cohttp_lwt.Body.to_string resp_body in
                 if status < 200 || status >= 300 then
-                  Lwt.return (Error (Core.Error.Auth_error
-                    (Printf.sprintf "token endpoint HTTP %d" status)))
+                  Lwt.return
+                    (Error
+                       (Core.Error.Auth_error
+                          (Printf.sprintf "token endpoint HTTP %d" status)))
                 else
                   (* Parse the JSON response *)
-                  (try
+                  try
                     let json = Yojson.Safe.from_string resp_str in
                     let field k =
                       match json with
@@ -230,22 +247,29 @@ let mint_token ~client ~table ~client_id ~client_secret :
                       match field "expires_in" with
                       | Some (`Int n) -> float_of_int n
                       | Some (`Float f) -> f
-                      | Some (`String s) -> (try float_of_string s with _ -> 3600.0)
+                      | Some (`String s) -> (
+                          try float_of_string s with _ -> 3600.0)
                       | _ -> 3600.0
                     in
-                    (match token with
+                    match token with
                     | Some t ->
                         let expiry = now +. expires_in in
                         client.token_cache <- Some (t, expiry);
                         Lwt.return (Ok t)
                     | None ->
-                        Lwt.return (Error (Core.Error.Auth_error "no access_token in response")))
+                        Lwt.return
+                          (Error
+                             (Core.Error.Auth_error
+                                "no access_token in response"))
                   with _ ->
-                    Lwt.return (Error (Core.Error.Auth_error "malformed token response")))
+                    Lwt.return
+                      (Error (Core.Error.Auth_error "malformed token response"))
               with exn ->
-                Lwt.return (Error (Core.Error.Transport_error
-                  (Printf.sprintf "token request failed: %s" (Printexc.to_string exn)))))))
-    )
+                Lwt.return
+                  (Error
+                     (Core.Error.Transport_error
+                        (Printf.sprintf "token request failed: %s"
+                           (Printexc.to_string exn)))))))
 
 (** Open a stream to the table with client-credentials OAuth.
 
@@ -256,53 +280,47 @@ let mint_token ~client ~table ~client_id ~client_secret :
     The returned [stream] owns the scope and must be closed with {!close}.
 
     IMPORTANT: The scope is created here and torn down by {!close}. The caller
-    must not use the stream after [close] is called.
-*)
+    must not use the stream after [close] is called. *)
 let create_stream client (table_props : table_properties) ~client_id
     ~client_secret ?(options = default_stream_options) () :
     (stream, Core.Error.t) result Lwt.t =
-  let* token_result = mint_token
-    ~client ~table:table_props.table_name ~client_id ~client_secret
+  let* token_result =
+    mint_token ~client ~table:table_props.table_name ~client_id ~client_secret
   in
   match token_result with
   | Error e -> Lwt.return (Error e)
-  | Ok token ->
+  | Ok token -> (
       (* Build gRPC headers *)
-      let headers = [
-        ("authorization", "Bearer " ^ token);
-        ("x-databricks-zerobus-table-name", table_props.table_name);
-        (":authority", Printf.sprintf "%s:%d" client.endpoint_host client.endpoint_port);
-      ] in
+      let headers =
+        [
+          ("authorization", "Bearer " ^ token);
+          ("x-databricks-zerobus-table-name", table_props.table_name);
+          ( ":authority",
+            Printf.sprintf "%s:%d" client.endpoint_host client.endpoint_port );
+        ]
+      in
 
       (* Create a long-lived scope (not using with_scope, which closes on return) *)
       let scope = { Io_lwt.Scope.daemons = [] } in
 
       (* Open the stream inside the scope (driver selected by record_type). *)
-      let* stream_result = open_impl
-        ~host:client.endpoint_host
-        ~port:client.endpoint_port
-        ~tls:true
-        ~headers
-        ~options
-        ~table:table_props
-        scope
+      let* stream_result =
+        open_impl ~host:client.endpoint_host ~port:client.endpoint_port
+          ~tls:true ~headers ~options ~table:table_props scope
       in
-      (match stream_result with
+      match stream_result with
       | Error e ->
           (* If opening fails, cancel and join scope daemons *)
           List.iter Lwt.cancel scope.daemons;
-          let* () = Lwt.join
-            (List.map
-              (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
-              scope.daemons)
+          let* () =
+            Lwt.join
+              (List.map
+                 (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
+                 scope.daemons)
           in
           Lwt.return (Error e)
       | Ok impl ->
-          let stream = {
-            impl;
-            scope;
-            table_name = table_props.table_name;
-          } in
+          let stream = { impl; scope; table_name = table_props.table_name } in
           Lwt.return (Ok stream))
 
 (** Custom-auth variant: supply headers directly instead of using OAuth.
@@ -316,15 +334,15 @@ let create_stream client (table_props : table_properties) ~client_id
 
     LIMITATION: This version does not cache tokens or refresh them on expiry.
     For production use, the caller should implement their own caching in the
-    [headers_provider].
-*)
-let create_stream_with_headers ?(tls = true) client (table_props : table_properties)
-    ~headers_provider ?(options = default_stream_options) () :
-    (stream, Core.Error.t) result Lwt.t =
+    [headers_provider]. *)
+let create_stream_with_headers ?(tls = true) client
+    (table_props : table_properties) ~headers_provider
+    ?(options = default_stream_options) () : (stream, Core.Error.t) result Lwt.t
+    =
   let* headers_result = headers_provider () in
   match headers_result with
   | Error e -> Lwt.return (Error e)
-  | Ok headers ->
+  | Ok headers -> (
       (* Ensure :authority is set *)
       let headers =
         let has_authority =
@@ -332,36 +350,29 @@ let create_stream_with_headers ?(tls = true) client (table_props : table_propert
         in
         if has_authority then headers
         else
-          (":authority", Printf.sprintf "%s:%d" client.endpoint_host client.endpoint_port)
+          ( ":authority",
+            Printf.sprintf "%s:%d" client.endpoint_host client.endpoint_port )
           :: headers
       in
 
       let scope = { Io_lwt.Scope.daemons = [] } in
 
-      let* stream_result = open_impl
-        ~host:client.endpoint_host
-        ~port:client.endpoint_port
-        ~tls
-        ~headers
-        ~options
-        ~table:table_props
-        scope
+      let* stream_result =
+        open_impl ~host:client.endpoint_host ~port:client.endpoint_port ~tls
+          ~headers ~options ~table:table_props scope
       in
-      (match stream_result with
+      match stream_result with
       | Error e ->
           List.iter Lwt.cancel scope.daemons;
-          let* () = Lwt.join
-            (List.map
-              (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
-              scope.daemons)
+          let* () =
+            Lwt.join
+              (List.map
+                 (fun d -> Lwt.catch (fun () -> d) (fun _ -> Lwt.return_unit))
+                 scope.daemons)
           in
           Lwt.return (Error e)
       | Ok impl ->
-          let stream = {
-            impl;
-            scope;
-            table_name = table_props.table_name;
-          } in
+          let stream = { impl; scope; table_name = table_props.table_name } in
           Lwt.return (Ok stream))
 
 (* Low-level access for tests / advanced callers: the raw IO instantiation and the
